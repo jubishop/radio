@@ -47,7 +47,7 @@ public struct Dashboard: Sendable {
                     throw RadioError("Pick a candidate or paste an Apple Music link")
                 }
                 let song = try await radio.match(songID: songID, choice: choice)
-                message = "Matched to \(song.artistName) – \(song.name). It joins the playlist on the next sync."
+                message = "Matched to \(song.artistName) – \(song.name). It joins the playlists on the next sync."
             case "ignore":
                 try await radio.ignore(songID: songID)
                 message = "Ignored. It won't be added or asked about again."

@@ -31,8 +31,17 @@ public struct Song: Equatable, Sendable {
     public var heldAt: Date?
 }
 
-/// Radio's one Apple Music playlist, which every station feeds.
+/// One of Radio's Apple Music playlists, which every station feeds.
 struct Playlist {
+    /// Raw values are stored in the database.
+    enum Kind: String, CaseIterable {
+        /// "Radio": the most recently played songs.
+        case recent
+        /// "Radio Archive": every song.
+        case archive
+    }
+
+    var kind: Kind
     /// The web API's library playlist ID, once Radio has created it.
     var id: String?
     /// Music.app's persistent ID for the same playlist.
@@ -104,7 +113,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 3
+    private static let schemaVersion: Int64 = 4
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -115,6 +124,7 @@ final class Store {
             if version < 1 { try createSchemaOne() }
             if version < 2 { try migrateToSchemaTwo() }
             if version < 3 { try migrateToSchemaThree() }
+            if version < 4 { try migrateToSchemaFour() }
         }
     }
 
@@ -220,6 +230,40 @@ final class Store {
         try db.execute("PRAGMA user_version = 3")
     }
 
+    /// Adds "Radio Archive", which keeps every song. Each playlist's IDs move
+    /// from meta to a row of `playlists`, and each entry records which
+    /// playlist it's in. The archive starts empty for the next sync to fill.
+    private func migrateToSchemaFour() throws {
+        try db.execute("CREATE TABLE playlists (kind TEXT PRIMARY KEY, library_id TEXT, music_id TEXT)")
+        try db.execute("""
+            INSERT INTO playlists (kind, library_id, music_id) VALUES ('recent',
+                (SELECT value FROM meta WHERE key = 'playlist.id'),
+                (SELECT value FROM meta WHERE key = 'playlist.music_id'))
+            """)
+        try db.execute("INSERT INTO playlists (kind) VALUES ('archive')")
+        try db.execute("DELETE FROM meta WHERE key IN ('playlist.id', 'playlist.music_id')")
+        try db.execute("""
+            CREATE TABLE playlist_tracks_4 (
+                playlist TEXT NOT NULL REFERENCES playlists(kind),
+                catalog_id TEXT NOT NULL,
+                song_id INTEGER NOT NULL REFERENCES songs(id),
+                station_id INTEGER REFERENCES stations(id) ON DELETE SET NULL,
+                added_at TEXT NOT NULL,
+                position_played_at TEXT,
+                PRIMARY KEY (playlist, catalog_id)
+            )
+            """)
+        try db.execute("""
+            INSERT INTO playlist_tracks_4 (playlist, catalog_id, song_id, station_id, added_at, position_played_at)
+            SELECT 'recent', catalog_id, song_id, station_id, added_at, position_played_at FROM playlist_tracks
+            ORDER BY rowid
+            """)
+        try db.execute("DROP TABLE playlist_tracks")
+        try db.execute("ALTER TABLE playlist_tracks_4 RENAME TO playlist_tracks")
+        try db.execute("CREATE INDEX playlist_tracks_by_station ON playlist_tracks (playlist, station_id, added_at)")
+        try db.execute("PRAGMA user_version = 4")
+    }
+
     // MARK: Stations
 
     func insertStation(_ info: StationInfo, at date: Date) throws -> Station {
@@ -308,7 +352,8 @@ final class Store {
         try db.query(
             """
             SELECT p.played_at, p.artist, p.title, s.status, s.catalog_url,
-                EXISTS (SELECT 1 FROM playlist_tracks t WHERE t.song_id = p.song_id) AS added
+                EXISTS (SELECT 1 FROM playlist_tracks t
+                        WHERE t.playlist = 'recent' AND t.song_id = p.song_id) AS added
             FROM plays p JOIN songs s ON s.id = p.song_id
             WHERE p.station_id = ? ORDER BY p.played_at DESC LIMIT ?
             """,
@@ -460,30 +505,32 @@ final class Store {
         )
     }
 
-    // MARK: Playlist
+    // MARK: Playlists
 
-    func playlist() throws -> Playlist {
-        Playlist(id: try meta("playlist.id"), musicID: try meta("playlist.music_id"))
+    func playlist(_ kind: Playlist.Kind) throws -> Playlist {
+        let row = try db.query("SELECT library_id, music_id FROM playlists WHERE kind = ?", [.text(kind.rawValue)]).first
+        return Playlist(kind: kind, id: row?.string("library_id"), musicID: row?.string("music_id"))
     }
 
     /// Clearing the ID, when the playlist was deleted in Music, also forgets
-    /// its entries so the next sync recreates it with every song.
-    func setPlaylistID(_ id: String?) throws {
+    /// its entries so the next sync recreates it with its songs.
+    func setPlaylistID(_ id: String?, for kind: Playlist.Kind) throws {
         try db.transaction {
-            try setMeta("playlist.id", id)
-            if id == nil {
-                try setMeta("playlist.music_id", nil)
-                try db.execute("DELETE FROM playlist_tracks")
+            if let id {
+                try db.execute("UPDATE playlists SET library_id = ? WHERE kind = ?", [.text(id), .text(kind.rawValue)])
+            } else {
+                try db.execute("UPDATE playlists SET library_id = NULL, music_id = NULL WHERE kind = ?", [.text(kind.rawValue)])
+                try db.execute("DELETE FROM playlist_tracks WHERE playlist = ?", [.text(kind.rawValue)])
             }
         }
     }
 
-    func setMusicPlaylistID(_ id: String?) throws {
-        try setMeta("playlist.music_id", id)
+    func setMusicPlaylistID(_ id: String?, for kind: Playlist.Kind) throws {
+        try db.execute("UPDATE playlists SET music_id = ? WHERE kind = ?", [id.map(SQLValue.text) ?? .null, .text(kind.rawValue)])
     }
 
-    /// The `limit` matched songs played most recently on any station, which
-    /// are the songs the playlist should hold. SQLite takes the bare columns
+    /// The matched songs played most recently on any station, at most the
+    /// bound limit, where -1 means no limit. SQLite takes the bare columns
     /// from the row that has the MAX, so each song's station is the one that
     /// played it last.
     private static let recentSongs = """
@@ -495,59 +542,59 @@ final class Store {
         )
         """
 
-    /// Recently played songs that aren't in the playlist yet, in the order of
-    /// their latest plays.
-    func songsToAdd(limit: Int) throws -> [TrackToAdd] {
+    /// Songs that belong in a playlist but aren't in it yet, in the order of
+    /// their latest plays. A nil limit means every matched song.
+    func songsToAdd(to kind: Playlist.Kind, limit: Int?) throws -> [TrackToAdd] {
         try db.query(
             """
             WITH \(Self.recentSongs)
             SELECT r.song_id, r.catalog_id, r.station_id, r.latest_played FROM recent r
-            WHERE NOT EXISTS (SELECT 1 FROM playlist_tracks t WHERE t.catalog_id = r.catalog_id)
+            WHERE NOT EXISTS (SELECT 1 FROM playlist_tracks t WHERE t.playlist = ? AND t.catalog_id = r.catalog_id)
             ORDER BY r.latest_played, r.song_id
             """,
-            [.integer(Int64(limit))]
+            [.integer(Int64(limit ?? -1)), .text(kind.rawValue)]
         ).map {
             TrackToAdd(songID: $0.int("song_id")!, catalogID: $0.string("catalog_id")!,
                        stationID: $0.int("station_id")!, latestPlay: $0.string("latest_played")!)
         }
     }
 
-    /// Entries for songs outside the `limit` most recently played, least
-    /// recently placed first.
-    func tracksToDrop(limit: Int) throws -> [TrackToDrop] {
+    /// A playlist's entries for songs outside the `limit` most recently
+    /// played, least recently placed first.
+    func tracksToDrop(from kind: Playlist.Kind, limit: Int) throws -> [TrackToDrop] {
         try db.query(
             """
             WITH \(Self.recentSongs)
             SELECT t.catalog_id, t.added_at, s.catalog_name, s.catalog_artist
             FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
-            WHERE t.catalog_id NOT IN (SELECT catalog_id FROM recent)
+            WHERE t.playlist = ? AND t.catalog_id NOT IN (SELECT catalog_id FROM recent)
             ORDER BY t.position_played_at, t.rowid
             """,
-            [.integer(Int64(limit))]
+            [.integer(Int64(limit)), .text(kind.rawValue)]
         ).map {
             TrackToDrop(catalogID: $0.string("catalog_id")!, catalogName: $0.string("catalog_name"),
                         catalogArtist: $0.string("catalog_artist"), addedAt: parseISODate($0.string("added_at")!)!)
         }
     }
 
-    func recordAdded(_ tracks: [TrackToAdd], at date: Date) throws {
+    func recordAdded(_ tracks: [TrackToAdd], to kind: Playlist.Kind, at date: Date) throws {
         try db.transaction {
             for track in tracks {
                 try db.execute(
                     """
-                    INSERT OR IGNORE INTO playlist_tracks (catalog_id, song_id, station_id, added_at, position_played_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT OR IGNORE INTO playlist_tracks (playlist, catalog_id, song_id, station_id, added_at, position_played_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    [.text(track.catalogID), .integer(track.songID), .integer(track.stationID), .text(iso(date)),
-                     .text(track.latestPlay)]
+                    [.text(kind.rawValue), .text(track.catalogID), .integer(track.songID), .integer(track.stationID),
+                     .text(iso(date)), .text(track.latestPlay)]
                 )
             }
         }
     }
 
-    /// Entries whose song has played again, on any station, since the entry
-    /// was placed, in the order of those plays.
-    func tracksToMove() throws -> [TrackToMove] {
+    /// A playlist's entries whose song has played again, on any station,
+    /// since the entry was placed, in the order of those plays.
+    func tracksToMove(in kind: Playlist.Kind) throws -> [TrackToMove] {
         try db.query(
             """
             SELECT t.song_id, t.catalog_id, t.added_at, s.catalog_name, s.catalog_artist,
@@ -555,10 +602,12 @@ final class Store {
             FROM playlist_tracks t
             JOIN songs s ON s.catalog_id = t.catalog_id AND s.status = 'matched'
             JOIN plays p ON p.song_id = s.id
+            WHERE t.playlist = ?
             GROUP BY t.catalog_id
             HAVING latest_played > COALESCE(t.position_played_at, '')
             ORDER BY latest_played
-            """
+            """,
+            [.text(kind.rawValue)]
         ).map {
             TrackToMove(songID: $0.int("song_id")!, catalogID: $0.string("catalog_id")!,
                         catalogName: $0.string("catalog_name"), catalogArtist: $0.string("catalog_artist"),
@@ -566,34 +615,39 @@ final class Store {
         }
     }
 
-    func setPosition(catalogID: String, playedAt: String) throws {
+    func setPosition(in kind: Playlist.Kind, catalogID: String, playedAt: String) throws {
         try db.execute(
-            "UPDATE playlist_tracks SET position_played_at = ? WHERE catalog_id = ?",
-            [.text(playedAt), .text(catalogID)]
+            "UPDATE playlist_tracks SET position_played_at = ? WHERE playlist = ? AND catalog_id = ?",
+            [.text(playedAt), .text(kind.rawValue), .text(catalogID)]
         )
     }
 
-    /// When a catalog song's entry was added, or nil if it isn't in the playlist.
-    func entryAddedAt(catalogID: String) throws -> Date? {
-        try db.query("SELECT added_at FROM playlist_tracks WHERE catalog_id = ?", [.text(catalogID)])
-            .first.flatMap { $0.string("added_at").flatMap(parseISODate) }
+    /// A catalog song's entries, in every playlist that holds it.
+    func entries(catalogID: String) throws -> [(kind: Playlist.Kind, addedAt: Date)] {
+        try db.query("SELECT playlist, added_at FROM playlist_tracks WHERE catalog_id = ?", [.text(catalogID)])
+            .compactMap { row in
+                guard let kind = row.string("playlist").flatMap(Playlist.Kind.init(rawValue:)),
+                      let addedAt = row.string("added_at").flatMap(parseISODate) else { return nil }
+                return (kind, addedAt)
+            }
     }
 
-    func removePlaylistTrack(catalogID: String) throws {
-        try db.execute("DELETE FROM playlist_tracks WHERE catalog_id = ?", [.text(catalogID)])
+    func removePlaylistTrack(from kind: Playlist.Kind, catalogID: String) throws {
+        try db.execute("DELETE FROM playlist_tracks WHERE playlist = ? AND catalog_id = ?",
+                       [.text(kind.rawValue), .text(catalogID)])
     }
 
-    func playlistCount() throws -> Int {
-        Int(try db.query("SELECT COUNT(*) AS n FROM playlist_tracks").first!.int("n")!)
+    func playlistCount(_ kind: Playlist.Kind) throws -> Int {
+        Int(try db.query("SELECT COUNT(*) AS n FROM playlist_tracks WHERE playlist = ?", [.text(kind.rawValue)]).first!.int("n")!)
     }
 
-    /// Songs a station's plays added to the playlist, newest first.
+    /// Songs a station's plays added to "Radio", newest first.
     func recentlyAdded(stationID: Int64, limit: Int) throws -> [AddedTrack] {
         try db.query(
             """
             SELECT t.added_at, s.artist, s.title, s.catalog_url
             FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
-            WHERE t.station_id = ? ORDER BY t.added_at DESC, t.rowid DESC LIMIT ?
+            WHERE t.playlist = 'recent' AND t.station_id = ? ORDER BY t.added_at DESC, t.rowid DESC LIMIT ?
             """,
             [.integer(stationID), .integer(Int64(limit))]
         ).map {

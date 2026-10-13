@@ -60,7 +60,7 @@ import Testing
         harness.music.setUserTokenStatus(200)
         try await harness.radio.saveUserToken("fresh-token")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Radio": ["Uprising"]])
+        #expect(harness.music.playlists()["Radio"] == ["Uprising"])
         #expect(try await harness.radio.appleMusicState() == .connected(storefront: "us", signedInAt: harness.clock.now))
     }
 
@@ -82,7 +82,7 @@ import Testing
         _ = try await harness.radio.run()
 
         #expect(harness.pushes.isEmpty)
-        #expect(harness.music.playlists() == ["Radio": ["Uprising"]])
+        #expect(harness.music.playlists()["Radio"] == ["Uprising"])
     }
 
     @Test func theWeeklyNudgeCountsNewlyHeldSongs() async throws {

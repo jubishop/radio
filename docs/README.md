@@ -61,7 +61,7 @@ hand-written pages to bypass failed checks.
 - [Git remotes](git-remotes.md): private SourceHut creation, dual pushes,
   verification, and fresh-clone setup.
 - [Radio design](design.md): accepted decisions for the station logger, the
-  Apple Music playlist, and the dashboard.
+  Apple Music playlists, and the dashboard.
 - [Operations](operations.md): installing Radio, connecting Apple Music,
   reviewing songs, alerts, and removal.
 - [Audacy now-playing feed](audacy-now-playing-feed.md): the JSON endpoint

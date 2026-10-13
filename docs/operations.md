@@ -44,13 +44,16 @@ six months.
 4. On the Mac mini, open <http://localhost:8102/auth> and sign in with the
    Apple ID that owns the library. Sign-in works only from the Mac mini.
 
-The next scheduled run matches songs and creates the "Radio" playlist, which
-every station feeds. Run `radio sync` to do it immediately.
+The next scheduled run matches songs and creates two playlists, which every
+station feeds. Run `radio sync` to do it immediately.
 
-The playlist holds the 100 songs played most recently on any station, so
-shuffling it plays what the stations played lately. When a new song joins,
-the least recently played one leaves the playlist but stays in your library.
-The playlist ends with the most recently played song. Sort it by
+- **Radio** holds the 100 songs played most recently on any station, so
+  shuffling it plays what the stations played lately. When a new song joins,
+  the least recently played one leaves the playlist but stays in your
+  library.
+- **Radio Archive** holds every song the stations have played.
+
+Both playlists end with the most recently played song. Sort one by
 **Playlist Order, descending** to see it newest first.
 
 Radio moves re-played songs to the end and drops old ones through Music.app,
@@ -63,7 +66,7 @@ answered, change the choice in System Settings > Privacy & Security >
 Automation. `bin/deploy` signs the binary with your Apple Development
 identity, so the approval lasts across updates. Until Music.app works, the
 dashboard shows why, new songs keep being added, and moves and drops wait,
-so the playlist can pass 100 songs.
+so "Radio" can pass 100 songs.
 
 When the sign-in expires, Radio sends one Pushover alert and the dashboard
 shows "sign-in expired". Repeat step 4.
@@ -86,10 +89,12 @@ shows "sign-in expired". Repeat step 4.
 
 Earlier releases gave each station its own playlist, such as "Alt 102.1". The
 first sync after upgrading creates "Radio" with the 100 most recently played
-matched songs, in order of latest play. The old playlists stop changing; delete them in Music when
-you no longer want them. If the library already has another playlist named
-"Radio", rename that one, or the dashboard reports that Music.app can't tell
-which playlist is Radio's.
+matched songs, in order of latest play. The old playlists stop changing;
+delete them in Music when you no longer want them. A later upgrade adds
+"Radio Archive" the same way, with every matched song. If the library
+already has another playlist named "Radio" or "Radio Archive", rename that
+one, or the dashboard reports that Music.app can't tell which playlist is
+Radio's.
 
 ## Alerts
 
@@ -109,5 +114,5 @@ launchctl bootout gui/$(id -u)/com.jubishop.radio.serve
 rm ~/Library/LaunchAgents/com.jubishop.radio.*.plist ~/.local/bin/radio
 ```
 
-Removing the agents keeps the data directory. The playlist stays in Apple
+Removing the agents keeps the data directory. The playlists stay in Apple
 Music.
