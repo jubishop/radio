@@ -26,23 +26,23 @@ it before running `direnv allow`; search does not need it.
 ## Checks
 
 Follow the [check schedule](foundation/engineering-policy.md#checks). This
-project has no application yet, so it has no `bin/check-application`; `bin/check
---full` runs only the foundation checks. Add `bin/check-application` with the
-first application code, following the schedule.
+project has no application yet, so it has no `bin/check-application`, and
+`bin/check --full` runs only the foundation checks. Add `bin/check-application`
+with the first application code, following the schedule.
 
 ## Runtime and toolchain versions
 
 The only tools needed today are the foundation's: Git and Python 3.9 or later
 for `bin/setup`, plus ShellCheck for `bin/check`. No application runtime is
-declared. When one is
-added, declare its minimum in the stack's usual manifest, following the
+declared. When one is added, declare its minimum in the stack's usual
+manifest, following the
 [version policy](foundation/engineering-policy.md#runtime-and-toolchain-versions).
 
 ## Deployment
 
 Nothing is deployed yet, and no deployment decision is recorded. When the
-project first deploys anything, record how it deploys, how nonfunctional changes
-skip deployment, and the manual override, following the
+project first deploys anything, record how it deploys, how nonfunctional
+changes skip deployment, and the manual override, following the
 [deployment policy](foundation/engineering-policy.md#deployment-decisions).
 
 ## Project Starter
