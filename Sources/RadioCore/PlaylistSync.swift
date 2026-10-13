@@ -7,10 +7,15 @@ struct MusicAppSession {
     var succeeded = false
 }
 
-/// Keeps each station's playlist in order of most recent play: new songs are
-/// added through the web API, and re-played songs are moved to the end
-/// through Music.app, which is the only interface that can remove an entry.
+/// Keeps the playlist to the most recently played songs, in order of their
+/// latest play on any station. New songs are added through the web API.
+/// Re-played songs are moved to the end, and songs that fall out of the most
+/// recent are dropped, through Music.app, the only interface that can remove
+/// an entry.
 extension Radio {
+    /// The name of the one playlist every station feeds.
+    public static let playlistName = "Radio"
+
     /// How long a song added through the web API may take to appear in
     /// Music.app. After this, an entry Music.app can't find is treated as
     /// removed by hand and is added again through the API.
@@ -28,47 +33,46 @@ extension Radio {
 
     /// Removes automatic matches that today's matching rules reject, such as
     /// DJ mixes matched before those were recognized, so they're matched
-    /// again. A match stays until every playlist holding it has dropped it.
+    /// again. A match stays until the playlist has dropped it.
     func replaceRejectedMatches(music: inout MusicAppSession) async throws -> Int {
         guard musicApp != nil else { return 0 }
+        var playlist = try store.playlist()
         var replaced = 0
         for song in try store.songs(status: .matched) where song.matchedBy == "auto" {
             guard let catalogID = song.catalogID, let name = song.catalogName, let artist = song.catalogArtist else { continue }
             let catalog = CatalogSong(id: catalogID, name: name, artistName: artist, albumName: song.catalogAlbum ?? "",
                                       url: song.catalogURL ?? "", isExplicit: false)
             guard chooseMatch(artist: song.artist, title: song.title, candidates: [catalog]) == nil else { continue }
-            var removedEverywhere = true
-            for entry in try store.entries(catalogID: catalogID) {
-                guard var station = try store.station(id: entry.stationID),
-                      let result = await perform(.remove, name: name, artist: artist, station: &station, music: &music)
-                else {
-                    removedEverywhere = false
-                    continue
-                }
-                switch result {
-                case .removed, .moved:
-                    try store.removePlaylistTrack(stationID: station.id, catalogID: catalogID)
-                case .trackNotFound where now().timeIntervalSince(entry.addedAt) > Self.musicAppSyncDelay:
-                    try store.removePlaylistTrack(stationID: station.id, catalogID: catalogID)
-                default:
-                    removedEverywhere = false
-                }
+            if let addedAt = try store.entryAddedAt(catalogID: catalogID) {
+                guard try await removeEntry(catalogID: catalogID, name: name, artist: artist, addedAt: addedAt,
+                                            playlist: &playlist, music: &music)
+                else { continue }
             }
-            if removedEverywhere {
-                try store.resetAutoMatches(catalogID: catalogID)
-                replaced += 1
-            }
+            try store.resetAutoMatches(catalogID: catalogID)
+            replaced += 1
         }
         return replaced
     }
 
-    /// Adds new songs and moves re-played ones, interleaved in play order so
-    /// the playlist ends with the most recent play.
-    func syncPlaylist(for station: Station, client: AppleMusicClient,
-                      music: inout MusicAppSession) async throws -> (added: Int, moved: Int) {
-        var station = station
-        let adds = try store.songsToAdd(stationID: station.id)
-        let moves = musicApp == nil ? [] : try store.tracksToMove(stationID: station.id)
+    /// Drops songs that more recent ones have pushed out, then adds new songs
+    /// and moves re-played ones, interleaved in play order so the playlist
+    /// ends with the most recent play. When Music.app can't drop songs, new
+    /// ones are still added, and the playlist exceeds its limit until it can.
+    func syncPlaylist(client: AppleMusicClient,
+                      music: inout MusicAppSession) async throws -> (added: Int, moved: Int, dropped: Int) {
+        var playlist = try store.playlist()
+        var dropped = 0
+        if musicApp != nil {
+            for track in try store.tracksToDrop(limit: playlistLimit) {
+                guard let name = track.catalogName, let artist = track.catalogArtist else { continue }
+                if try await removeEntry(catalogID: track.catalogID, name: name, artist: artist, addedAt: track.addedAt,
+                                         playlist: &playlist, music: &music) {
+                    dropped += 1
+                }
+            }
+        }
+        let adds = try store.songsToAdd(limit: playlistLimit)
+        let moves = musicApp == nil ? [] : try store.tracksToMove()
         var steps: [(latestPlay: String, add: TrackToAdd?, move: TrackToMove?)] =
             adds.map { ($0.latestPlay, $0, nil) } + moves.map { ($0.latestPlay, nil, $0) }
         steps.sort { ($0.latestPlay, $0.add == nil ? 1 : 0) < ($1.latestPlay, $1.add == nil ? 1 : 0) }
@@ -77,49 +81,48 @@ extension Radio {
         var moved = 0
         var batch: [TrackToAdd] = []
         for (index, step) in steps.enumerated() {
-            if let move = step.move, try await self.move(move, in: &station, client: client, music: &music) {
+            if let move = step.move, try await self.move(move, in: &playlist, client: client, music: &music) {
                 moved += 1
             }
             guard let track = step.add else { continue }
             batch.append(track)
             let nextIsAdd = index + 1 < steps.count && steps[index + 1].add != nil
             guard !nextIsAdd || batch.count == AppleMusicClient.batchSize else { continue }
-            guard try await add(batch, to: &station, client: client) else { return (added, moved) }
+            guard try await add(batch, to: &playlist, client: client) else { return (added, moved, dropped) }
             added += batch.count
             batch = []
         }
-        return (added, moved)
+        return (added, moved, dropped)
     }
 
     /// Returns false when the playlist was deleted in Music; it's recreated
     /// with every song on the next sync.
-    private func add(_ tracks: [TrackToAdd], to station: inout Station, client: AppleMusicClient) async throws -> Bool {
-        if let playlistID = station.playlistID {
+    private func add(_ tracks: [TrackToAdd], to playlist: inout Playlist, client: AppleMusicClient) async throws -> Bool {
+        if let playlistID = playlist.id {
             do {
                 try await client.addSongs(tracks.map(\.catalogID), toPlaylist: playlistID)
             } catch let error as HTTPStatusError where error.status == 404 {
-                try store.setPlaylist(stationID: station.id, playlistID: nil)
-                try store.setMusicPlaylist(stationID: station.id, musicPlaylistID: nil)
+                try store.setPlaylistID(nil)
                 return false
             }
         } else {
             let created = try await client.createPlaylist(
-                name: station.name,
-                description: "Every song \(station.name) has played, most recent last. Collected by Radio.",
+                name: Self.playlistName,
+                description: "The \(playlistLimit) songs played most recently on the stations Radio follows, most recent last.",
                 songIDs: tracks.map(\.catalogID)
             )
-            try store.setPlaylist(stationID: station.id, playlistID: created)
-            station.playlistID = created
+            try store.setPlaylistID(created)
+            playlist.id = created
         }
-        try store.recordAdded(stationID: station.id, tracks: tracks, at: now())
+        try store.recordAdded(tracks, at: now())
         return true
     }
 
     /// Returns true when the entry now sits at the end of the playlist.
-    private func move(_ track: TrackToMove, in station: inout Station, client: AppleMusicClient,
+    private func move(_ track: TrackToMove, in playlist: inout Playlist, client: AppleMusicClient,
                       music: inout MusicAppSession) async throws -> Bool {
-        guard let name = track.catalogName, let artist = track.catalogArtist, let playlistID = station.playlistID,
-              let result = await perform(.move, name: name, artist: artist, station: &station, music: &music)
+        guard let name = track.catalogName, let artist = track.catalogArtist, let playlistID = playlist.id,
+              let result = await perform(.move, name: name, artist: artist, playlist: &playlist, music: &music)
         else { return false }
         switch result {
         case .moved:
@@ -134,24 +137,43 @@ extension Radio {
             try await client.addSongs([track.catalogID], toPlaylist: playlistID)
         case .notInLibrary:
             // Nothing was changed and retrying won't help; leave it in place.
-            try store.setPosition(stationID: station.id, catalogID: track.catalogID, playedAt: track.latestPlay)
+            try store.setPosition(catalogID: track.catalogID, playedAt: track.latestPlay)
             return false
         case .playlistNotFound, .ambiguousPlaylist:
             return false
         }
-        try store.setPosition(stationID: station.id, catalogID: track.catalogID, playedAt: track.latestPlay)
+        try store.setPosition(catalogID: track.catalogID, playedAt: track.latestPlay)
         return true
     }
 
-    /// Runs one Music.app action for a station's playlist, remembering the
-    /// playlist's Music.app ID. Returns nil when Music.app failed, now or
-    /// earlier in this sync.
-    private func perform(_ action: MusicAppAction, name: String, artist: String, station: inout Station,
+    /// Removes a song's entry through Music.app. Returns true once the entry
+    /// is gone, which includes an entry Music.app hasn't seen for longer than
+    /// the sync delay, since it was removed by hand.
+    private func removeEntry(catalogID: String, name: String, artist: String, addedAt: Date,
+                             playlist: inout Playlist, music: inout MusicAppSession) async throws -> Bool {
+        guard let result = await perform(.remove, name: name, artist: artist, playlist: &playlist, music: &music)
+        else { return false }
+        switch result {
+        case .removed, .moved:
+            break
+        case .trackNotFound where now().timeIntervalSince(addedAt) > Self.musicAppSyncDelay:
+            break
+        default:
+            return false
+        }
+        try store.removePlaylistTrack(catalogID: catalogID)
+        return true
+    }
+
+    /// Runs one Music.app action on the playlist, remembering the playlist's
+    /// Music.app ID. Returns nil when Music.app failed, now or earlier in
+    /// this sync.
+    private func perform(_ action: MusicAppAction, name: String, artist: String, playlist: inout Playlist,
                          music: inout MusicAppSession) async -> MusicAppResult? {
         guard let musicApp, music.failure == nil else { return nil }
         let result: MusicAppResult
         do {
-            result = try await musicApp.perform(action, playlistID: station.musicPlaylistID, playlistName: station.name,
+            result = try await musicApp.perform(action, playlistID: playlist.musicID, playlistName: Self.playlistName,
                                                  songName: name, songArtist: artist)
         } catch {
             music.failure = String(describing: error)
@@ -160,19 +182,19 @@ extension Radio {
         switch result {
         case .moved(let id), .removed(let id), .trackNotFound(let id), .notInLibrary(let id):
             music.succeeded = true
-            if station.musicPlaylistID != id {
-                try? store.setMusicPlaylist(stationID: station.id, musicPlaylistID: id)
-                station.musicPlaylistID = id
+            if playlist.musicID != id {
+                try? store.setMusicPlaylistID(id)
+                playlist.musicID = id
             }
         case .playlistNotFound:
             // A remembered ID may be stale; find it by name next time. A new
             // playlist may simply not have reached this Mac yet.
-            if station.musicPlaylistID != nil {
-                try? store.setMusicPlaylist(stationID: station.id, musicPlaylistID: nil)
-                station.musicPlaylistID = nil
+            if playlist.musicID != nil {
+                try? store.setMusicPlaylistID(nil)
+                playlist.musicID = nil
             }
         case .ambiguousPlaylist:
-            music.failure = "Music has more than one playlist named \"\(station.name)\". "
+            music.failure = "Music has more than one playlist named \"\(Self.playlistName)\". "
                 + "Rename the others so Radio can tell which one is its playlist."
         }
         return result

@@ -4,8 +4,9 @@ status: current
 
 # Radio design
 
-Radio logs each song that Alt 102.1 (WRXL, Richmond) plays and turns the log
-into an Apple Music playlist. This page records the accepted decisions, the
+Radio logs each song its stations play, starting with Alt 102.1 (WRXL,
+Richmond), and keeps the 100 most recently played in one Apple Music playlist
+named "Radio". This page records the accepted decisions, the
 constraints they rest on, and the questions still open. Feed details are in
 [Audacy now-playing feed](audacy-now-playing-feed.md).
 
@@ -17,6 +18,18 @@ constraints they rest on, and the questions still open. Feed details are in
 - **The feed keeps only the last 50 plays,** about four hours, and older plays
   can't be fetched. If the logger stops for longer than that, those plays are
   lost.
+- **Apple publishes no playlist size limit.** Apple's
+  [Music guide](https://support.apple.com/guide/music/access-to-your-music-library-musa3dd5209/mac)
+  caps the cloud library at 100,000 songs, not counting iTunes Store
+  purchases. It doesn't say whether a playlist has a limit or what happens
+  past one (checked 2026-10-13). In a 2022
+  [Apple Community thread](https://discussions.apple.com/thread/253717041),
+  a user reported that a playlist stopped at 50,000 songs: songs added past
+  that appeared at first, then disappeared without an error. Apple hasn't
+  confirmed this. Radio's playlist holds at most 100 songs, far below either
+  figure, but the songs it drops stay in the library. The library therefore
+  still grows with every new song a station plays. On 2026-10-13, Radio's
+  first five hours on one station logged 66 plays of 64 songs.
 
 ## Decisions
 
@@ -43,11 +56,12 @@ service by hand isn't enough.
 
 ### Add every unique song the first time it plays
 
-Accepted 2026-10-13. Every song the station plays goes into the playlist,
-added the first time it's heard, so the playlist only grows. Its order was
-first-heard order until a
+Accepted 2026-10-13. Every song a station plays goes into the playlist,
+added the first time it's heard. Its order was first-heard order until a
 [later decision](#move-a-re-played-song-to-the-end-of-the-playlist) the same
-day ordered it by most recent play. The user accepted the recommendation, whose reasons were that it
+day ordered it by most recent play. The playlist only grew until
+[another decision](#keep-only-the-100-most-recently-played-songs) that day
+capped it at 100 songs. The user accepted the recommendation, whose reasons were that it
 matches the goal of logging every song and that the public Apple Music API
 seems to support only adding tracks to library playlists. Apple said in its
 developer forums that it couldn't offer removal, and developers report that
@@ -59,8 +73,9 @@ show, are included.
 ### Move a re-played song to the end of the playlist
 
 Accepted 2026-10-13. This replaces the first-heard order in the decision
-above. When a song already in a station's playlist plays again, Radio moves
-its entry to the end. Each playlist is therefore ordered by most recent play,
+above. When a song already in the playlist plays again on any station, Radio
+moves its entry to the end. The playlist is therefore ordered by most recent
+play,
 and sorting it in reverse (newest first) shows re-played songs at the top. The
 user asked for re-played songs to return to the top and chose the recommended
 approach.
@@ -167,24 +182,42 @@ The user accepted the recommendation, whose reason was that a lapsed token or
 a dead feed is otherwise invisible until the playlist stops growing. Radio
 sends no alerts for new songs.
 
-### Support many stations, each with its own playlist
+### Support many stations
 
 Accepted 2026-10-13. Radio polls Alt 102.1 (WRXL, Richmond) now, and the user
-asked for the design to allow more stations later. Each station's songs go
-into a separate playlist named after that station.
+asked for the design to allow more stations later. At first each station had
+its own playlist, named after the station, until a
+[later decision](#funnel-every-station-into-one-playlist-named-radio) the same
+day put every station's songs in one playlist.
 
 - Stations are stored data, not code. `radio station add <audacy-slug>` reads
   the station's Audacy page for its feed ID (`window.STATION_ROC_ID`) and its
   name. Each run polls every station.
-- Each station has its own playlist, which Radio creates on first sync and
-  then tracks by its library playlist ID. WRXL's playlist is named
-  "Alt 102.1". Renaming it in Music won't break syncing.
-- Plays, playlist membership, and feed-failure alerts are tracked per station.
-  Apple Music matches are cached across stations, so a song that two stations
-  play is searched only once.
+- Plays and feed-failure alerts are tracked per station. Apple Music matches
+  are cached across stations, so a song that two stations play is searched
+  only once.
 - The Audacy feed reader sits behind a small source interface, so a station
   from another network can get its own reader later. Only the Audacy reader is
   built now.
+
+### Funnel every station into one playlist named "Radio"
+
+Accepted 2026-10-13. This replaces the per-station playlists in the decision
+above. The user asked to rename the playlist to something like "Radio" so
+that every station feeds a single playlist. Radio creates the playlist on its
+first sync and then tracks it by its library playlist ID. The playlist holds
+each song once, however many stations play it, ordered by the song's most
+recent play on any station.
+
+### Keep only the 100 most recently played songs
+
+Accepted 2026-10-13. This replaces the ever-growing playlist in the decisions
+above. The user asked to limit the playlist to 100 songs and drop the oldest
+when a new one arrives, so that shuffling it plays songs the stations played
+recently. The oldest song is the one least recently played on any station,
+so a re-played song stays. Radio drops songs through Music.app, the same way
+it moves them, and a dropped song returns when a station plays it again.
+Dropped songs stay in the library.
 
 ### Prefer explicit versions
 
@@ -227,7 +260,8 @@ The macOS application firewall was off on 2026-10-13, and port 8102 was free.
 Accepted 2026-10-13. The user asked for a live site showing what has been
 happening, and chose the recommended home-network dashboard over a public
 site. The page at `http://jubi.local:8102` shows, for each station, the
-current and recent plays and the songs just added to its playlist. It also
+current and recent plays and the songs its plays just added to the playlist.
+It also
 shows the review queue and health: last poll, last sync, and Apple Music
 sign-in status. The page refreshes itself. Public hosting was deferred
 because it would add a service to deploy, secure, and keep in sync.
@@ -278,8 +312,22 @@ explicitly approved them.
   `~/Library/Application Support/Radio`, so development checkouts never touch
   the live database.
 - **Song identity:** a song is its normalized primary artist plus its title
-  without parenthetical suffixes. Each station's playlist holds an Apple
-  Music catalog ID at most once.
+  without parenthetical suffixes. The playlist holds an Apple Music catalog
+  ID at most once.
+- **Upgrading to one playlist:** the web API can't rename a playlist or
+  remove its entries, so the upgrade doesn't reuse a station's playlist. The
+  first sync after it creates "Radio" with the 100 most recently played
+  matched songs, in order of latest play. Each station's old playlist, such
+  as "Alt 102.1", stops changing and stays in Music until it's deleted by
+  hand.
+- **Dropping songs:** each sync first drops, through Music.app, every entry
+  outside the 100 most recently played songs, and then adds and moves. When
+  Music.app can't drop them, new songs are still added, and the playlist
+  passes 100 until Music.app works. An entry to drop that Music.app can't
+  find is retried for an hour, like a move, and then forgotten.
+- **Station credit:** a song added to the playlist is credited to the
+  station whose play placed it, which is its latest play at that time. The
+  dashboard lists each station's credited songs as "just added".
 - **Moves in practice:** adds and moves run in play order within each sync.
   Music.app finds a playlist by name until it learns the playlist's
   persistent ID, and finds an entry by its catalog title and artist. It
@@ -291,8 +339,8 @@ explicitly approved them.
   against the current rules. Any the rules now reject are removed through
   Music.app and matched again. On 2026-10-13 the first release was found to
   have accepted four DJ-mix versions ("(Mixed)" titles from "(DJ Mix)"
-  albums). The updated matcher rejects these, so they're replaced once
-  Music.app access is approved.
+  albums). The updated matcher rejects these. Music.app replaced them in
+  "Alt 102.1" on 2026-10-13, once its access was approved.
 - **Apple sign-in:** the dashboard's `/auth` page runs MusicKit JS and
   accepts only loopback requests, so it's opened at `http://localhost:8102/auth`
   on the Mac mini. That page receives a developer token, which shouldn't

@@ -4,8 +4,8 @@ import SQLite3
 import Testing
 
 @Suite struct MusicAppTests {
-    func harnessWithSongs(_ titles: [String]) async throws -> Harness {
-        let harness = try Harness()
+    func harnessWithSongs(_ titles: [String], playlistLimit: Int = 100) async throws -> Harness {
+        let harness = try Harness(playlistLimit: playlistLimit)
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
         for (index, title) in titles.enumerated() {
@@ -21,7 +21,7 @@ import Testing
         harness.clock.advance(hours: 1)
         harness.play("Band", "B")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["A", "C", "B"]])
+        #expect(harness.music.playlists() == ["Radio": ["A", "C", "B"]])
     }
 
     @Test func replaysMoveInTheOrderTheyWerePlayed() async throws {
@@ -30,7 +30,71 @@ import Testing
         harness.play("Band", "C", minutesAgo: 5)
         harness.play("Band", "A")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["B", "D", "C", "A"]])
+        #expect(harness.music.playlists() == ["Radio": ["B", "D", "C", "A"]])
+    }
+
+    @Test func aSongReplayedOnAnotherStationMovesToTheEnd() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"])
+        _ = try await harness.radio.addStation(slug: "rock")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "A", on: "101-2000")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["B", "C", "A"]])
+    }
+
+    @Test func aNewSongPushesTheLeastRecentlyPlayedOneOutOfAFullPlaylist() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
+        harness.music.addToCatalog("Band", "D")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        let (_, sync) = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["B", "C", "D"]])
+        #expect(sync.added == 1)
+        #expect(sync.dropped == 1)
+        #expect(try await harness.radio.status().playlistCount == 3)
+    }
+
+    @Test func aReplayKeepsASongInAFullPlaylist() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
+        harness.music.addToCatalog("Band", "D")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "A", minutesAgo: 5)
+        harness.play("Band", "D")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["C", "A", "D"]])
+    }
+
+    @Test func aBacklogAddsOnlyTheMostRecentlyPlayedSongs() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C", "D", "E"], playlistLimit: 3)
+        #expect(harness.music.playlists() == ["Radio": ["C", "D", "E"]])
+        #expect(harness.musicApp.calls == 0)
+    }
+
+    @Test func aFullPlaylistShrinksOnceMusicCanRemoveSongs() async throws {
+        let harness = try await harnessWithSongs(["A", "B"], playlistLimit: 2)
+        harness.music.addToCatalog("Band", "C")
+        harness.musicApp.fail(with: "Radio isn't allowed to control Music")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "C")
+        _ = try await harness.radio.run()
+        // New songs still arrive while Music.app can't remove old ones.
+        #expect(harness.music.playlists() == ["Radio": ["A", "B", "C"]])
+
+        harness.musicApp.fail(with: nil)
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["B", "C"]])
+    }
+
+    @Test func aSongToDropThatWasRemovedByHandIsForgotten() async throws {
+        let harness = try await harnessWithSongs(["A", "B"], playlistLimit: 2)
+        harness.music.addToCatalog("Band", "C")
+        harness.music.removeByHand("A", from: "Radio")
+        harness.clock.advance(hours: 2)
+        harness.play("Band", "C")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["B", "C"]])
+        #expect(try await harness.radio.status().playlistCount == 2)
     }
 
     @Test func songsAreNotMovedUnlessTheyPlayAgainAfterBeingAdded() async throws {
@@ -47,7 +111,7 @@ import Testing
         _ = try await harness.radio.run()
 
         // Each song is added at its latest play, so nothing needs moving.
-        #expect(harness.music.playlists() == ["Alt 102.1": ["B", "A"]])
+        #expect(harness.music.playlists() == ["Radio": ["B", "A"]])
         #expect(harness.musicApp.calls == 0)
     }
 
@@ -57,13 +121,13 @@ import Testing
         harness.clock.advance(hours: 1)
         harness.play("Band", "A")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["A", "B"]])
+        #expect(harness.music.playlists() == ["Radio": ["A", "B"]])
         #expect(try await harness.radio.status().musicAppError == "Radio isn't allowed to control Music")
 
         harness.musicApp.fail(with: nil)
         harness.clock.advance(hours: 0.25)
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["B", "A"]])
+        #expect(harness.music.playlists() == ["Radio": ["B", "A"]])
         #expect(try await harness.radio.status().musicAppError == nil)
     }
 
@@ -73,12 +137,12 @@ import Testing
         harness.play("Band", "A")
         _ = try await harness.radio.run()
 
-        harness.music.renamePlaylist("Alt 102.1", to: "Richmond Alt")
+        harness.music.renamePlaylist("Radio", to: "Radio Songs")
         harness.clock.advance(hours: 1)
         harness.play("Band", "B")
         _ = try await harness.radio.run()
 
-        #expect(harness.music.playlists() == ["Richmond Alt": ["C", "A", "B"]])
+        #expect(harness.music.playlists() == ["Radio Songs": ["C", "A", "B"]])
     }
 
     @Test func anEntryMusicCannotSeeYetIsRetriedRatherThanAddedAgain() async throws {
@@ -87,40 +151,41 @@ import Testing
         harness.clock.advance(hours: 0.25)
         harness.play("Band", "A")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["A", "B", "C"]])
+        #expect(harness.music.playlists() == ["Radio": ["A", "B", "C"]])
 
         harness.music.setSyncedToMusicApp("A", true)
         harness.clock.advance(hours: 0.25)
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["B", "C", "A"]])
+        #expect(harness.music.playlists() == ["Radio": ["B", "C", "A"]])
     }
 
     @Test func aSongRemovedByHandReturnsWhenItPlaysAgain() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C"])
-        harness.music.removeByHand("A", from: "Alt 102.1")
+        harness.music.removeByHand("A", from: "Radio")
         harness.clock.advance(hours: 2)
         harness.play("Band", "A")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["B", "C", "A"]])
+        #expect(harness.music.playlists() == ["Radio": ["B", "C", "A"]])
     }
 
     @Test func aPlaylistMusicCannotSeeYetIsRetried() async throws {
         let harness = try await harnessWithSongs(["A"])
-        harness.music.renamePlaylist("Alt 102.1", to: "Hidden")
+        harness.music.renamePlaylist("Radio", to: "Hidden")
         harness.clock.advance(hours: 0.25)
         harness.play("Band", "A")
         _ = try await harness.radio.run()
         #expect(harness.music.playlists() == ["Hidden": ["A"]])
 
-        harness.music.renamePlaylist("Hidden", to: "Alt 102.1")
+        harness.music.renamePlaylist("Hidden", to: "Radio")
         harness.clock.advance(hours: 0.25)
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["A"]])
+        #expect(harness.music.playlists() == ["Radio": ["A"]])
     }
 
-    /// The live database was created by the first release (schema 1), before
-    /// the matcher rejected DJ mixes and before replays moved songs.
-    @Test func upgradingReplacesDJMixMatchesAndMovesEarlierReplays() async throws {
+    /// Databases from earlier releases (schema 1, and schema 2 on the Mac
+    /// mini since 2026-10-13) gave each station its own playlist. The first
+    /// release also accepted DJ mixes that the matcher now rejects.
+    @Test func upgradingStartsOneRadioPlaylistWithEverySongAndReplacesDJMixes() async throws {
         let harness = try Harness()
         try await harness.signIn()
         let dog = harness.music.addToCatalog("Florence + the Machine", "Dog Days Are Over (Mixed)", album: "Festival Mix 2022 (DJ Mix)")
@@ -159,10 +224,14 @@ import Testing
 
         _ = try await upgraded.sync()
 
-        // The DJ mix is replaced by the album version, re-added at its last
-        // play's turn; Savior played most recently, so it ends up last.
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Numb", "Dog Days Are Over", "Savior"]])
-        #expect(try await upgraded.status().stations.first?.playlistCount == 3)
+        // The station's old playlist is left as it was. The new one holds the
+        // album version instead of the DJ mix, in order of latest play.
+        #expect(harness.music.playlists() == [
+            "Alt 102.1": ["Dog Days Are Over (Mixed)", "Savior", "Numb"],
+            "Radio": ["Dog Days Are Over", "Numb", "Savior"],
+        ])
+        #expect(try await upgraded.status().playlistCount == 3)
+        #expect(harness.musicApp.calls == 0)
     }
 
     /// The tables exactly as the first release (commit 4580917) created them.

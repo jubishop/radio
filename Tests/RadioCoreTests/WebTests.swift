@@ -31,7 +31,7 @@ import Testing
         #expect(page.contains("Apple Music connected"))
         #expect(page.contains("1 song to review"))
         #expect(page.contains("in playlist"))
-        #expect(page.contains("1 songs in its playlist"))
+        #expect(page.contains("1 song in the Radio playlist"))
     }
 
     @Test func theReviewPageMatchesAndIgnoresSongs() async throws {
@@ -59,7 +59,7 @@ import Testing
         #expect(try await harness.radio.heldSongs().isEmpty)
 
         _ = try await harness.radio.sync()
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Come As You Are (Live)"]])
+        #expect(harness.music.playlists() == ["Radio": ["Come As You Are (Live)"]])
     }
 
     @Test func signInIsOnlyServedToThisMac() async throws {

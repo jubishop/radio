@@ -44,18 +44,26 @@ six months.
 4. On the Mac mini, open <http://localhost:8102/auth> and sign in with the
    Apple ID that owns the library. Sign-in works only from the Mac mini.
 
-The next scheduled run matches songs and creates each station's playlist,
-named after the station. Run `radio sync` to do it immediately.
+The next scheduled run matches songs and creates the "Radio" playlist, which
+every station feeds. Run `radio sync` to do it immediately.
 
-Playlists end with the most recently played song. Sort a playlist by
-**Playlist Order, descending** to see it newest first. A song that plays again
-moves to the end through Music.app, so Music.app on the Mac mini must stay
-signed in with **Sync Library** on. The first time the scheduled run uses it,
-approve "radio wants access to control Music". If you missed that prompt,
-allow it in System Settings > Privacy & Security > Automation. `bin/deploy`
-signs the binary with your Apple Development identity, so the approval lasts
-across updates. Until Music.app works, the dashboard shows why, new songs keep
-being added, and moves wait.
+The playlist holds the 100 songs played most recently on any station, so
+shuffling it plays what the stations played lately. When a new song joins,
+the least recently played one leaves the playlist but stays in your library.
+The playlist ends with the most recently played song. Sort it by
+**Playlist Order, descending** to see it newest first.
+
+Radio moves re-played songs to the end and drops old ones through Music.app,
+so Music.app on the Mac mini must stay signed in with **Sync Library** on.
+Approve "radio wants access to control Music" the first time Radio uses it.
+The prompt stays up for only two minutes, during a scheduled run that has a
+song to move or drop. To bring it up while you're at the Mac mini, run
+`launchctl kickstart gui/$(id -u)/com.jubishop.radio.run`. Once you've
+answered, change the choice in System Settings > Privacy & Security >
+Automation. `bin/deploy` signs the binary with your Apple Development
+identity, so the approval lasts across updates. Until Music.app works, the
+dashboard shows why, new songs keep being added, and moves and drops wait,
+so the playlist can pass 100 songs.
 
 When the sign-in expires, Radio sends one Pushover alert and the dashboard
 shows "sign-in expired". Repeat step 4.
@@ -72,7 +80,16 @@ shows "sign-in expired". Repeat step 4.
 - **Status and data:** `radio status`, and `radio export > plays.csv` for
   every logged play.
 - **More stations:** `radio station add <audacy-slug>`, where the slug is the
-  path in the station's audacy.com URL. Each station gets its own playlist.
+  path in the station's audacy.com URL. Its songs join the "Radio" playlist.
+
+## Upgrade from per-station playlists
+
+Earlier releases gave each station its own playlist, such as "Alt 102.1". The
+first sync after upgrading creates "Radio" with the 100 most recently played
+matched songs, in order of latest play. The old playlists stop changing; delete them in Music when
+you no longer want them. If the library already has another playlist named
+"Radio", rename that one, or the dashboard reports that Music.app can't tell
+which playlist is Radio's.
 
 ## Alerts
 
@@ -92,5 +109,5 @@ launchctl bootout gui/$(id -u)/com.jubishop.radio.serve
 rm ~/Library/LaunchAgents/com.jubishop.radio.*.plist ~/.local/bin/radio
 ```
 
-Removing the agents keeps the data directory. Playlists already in Apple
-Music stay there.
+Removing the agents keeps the data directory. The playlist stays in Apple
+Music.

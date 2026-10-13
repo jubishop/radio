@@ -11,7 +11,7 @@ let usage = """
     Scheduled work
       run                     Poll, sync, and send alerts (launchd runs this)
       poll                    Log new plays from every station
-      sync                    Match new songs and update playlists
+      sync                    Match new songs and update the playlist
       serve [--port 8102]     Serve the dashboard (launchd keeps this running)
 
     Review
@@ -72,11 +72,10 @@ func printSync(_ report: SyncReport) {
         log("Sync skipped: \(reason)")
         return
     }
-    let added = report.added.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value)" }.joined(separator: ", ")
-    let moved = report.moved.filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
     log("Sync: \(report.matched) matched, \(report.held) held for review"
-        + (added.isEmpty ? "" : "; added \(added)")
-        + (moved.isEmpty ? "" : "; moved to end \(moved)")
+        + (report.added == 0 ? "" : "; added \(report.added)")
+        + (report.moved == 0 ? "" : "; moved \(report.moved) to the end")
+        + (report.dropped == 0 ? "" : "; dropped \(report.dropped)")
         + (report.replaced == 0 ? "" : "; replaced \(report.replaced) rejected matches"))
     if let error = report.error { log("Sync failed: \(error)") }
 }
@@ -107,10 +106,10 @@ func main(_ arguments: [String]) async throws -> Int32 {
         case "add":
             guard rest.count >= 2 else { throw UsageError(description: "Usage: radio station add <audacy-slug> [--name NAME]") }
             let station = try await radio.addStation(slug: rest[1], name: try option("--name", in: rest))
-            print("Added \(station.name) (\(station.slug), feed \(station.feedID)). Its playlist will be named \"\(station.name)\".")
+            print("Added \(station.name) (\(station.slug), feed \(station.feedID)). Its songs go into the \"\(Radio.playlistName)\" playlist.")
         case "list":
             for station in try await radio.stations() {
-                print("\(station.slug)\t\(station.name)\t\(station.source):\(station.feedID)\t\(station.playlistID ?? "no playlist yet")")
+                print("\(station.slug)\t\(station.name)\t\(station.source):\(station.feedID)")
             }
         default:
             throw UsageError(description: "Usage: radio station add|list")
@@ -148,7 +147,7 @@ func main(_ arguments: [String]) async throws -> Int32 {
     case "match":
         let (id, choice) = try parseMatch(rest)
         let song = try await makeRadio().match(songID: id, choice: choice)
-        print("Matched to \(song.artistName) – \(song.name). It joins playlists on the next sync.")
+        print("Matched to \(song.artistName) – \(song.name). It joins the playlist on the next sync.")
     case "ignore":
         guard let id = rest.first.flatMap({ Int64($0) }) else { throw UsageError(description: "Usage: radio ignore <id>") }
         try await makeRadio().ignore(songID: id)
@@ -187,11 +186,12 @@ func main(_ arguments: [String]) async throws -> Int32 {
         print("Last sync: \(status.lastSyncAt.map(displayTime) ?? "never")\(status.lastSyncError.map { " (failed: \($0))" } ?? "")")
         print("Songs to review: \(status.heldCount)")
         if let error = status.musicAppError { print("Music.app: \(error)") }
+        print("Playlist \"\(Radio.playlistName)\": \(status.playlistCount) of \(radio.playlistLimit) songs")
         for summary in status.stations {
             let station = summary.station
             let feed = station.pollFailingSince.map { "failing since \(displayTime($0)): \(station.lastPollError ?? "")" }
                 ?? station.lastPollOKAt.map { "read \(displayTime($0))" } ?? "not read yet"
-            print("\(station.name): feed \(feed); \(summary.playCount) plays; \(summary.playlistCount) songs in playlist")
+            print("\(station.name): feed \(feed); \(summary.playCount) plays")
         }
     case "export":
         print(try await makeRadio().exportCSV(stationSlug: try option("--station", in: rest)), terminator: "")

@@ -9,6 +9,7 @@ enum Pages {
               <h1>Radio</h1>
               <p class="health">\(appleMusic(status.appleMusic, signInURL: signInURL))
                 · \(review(count: status.heldCount))
+                · \(status.playlistCount) song\(status.playlistCount == 1 ? "" : "s") in the \(escape(Radio.playlistName)) playlist
                 · Last sync \(status.lastSyncAt.map { escape(displayTime($0)) } ?? "never")</p>
             """
         if let error = status.lastSyncError {
@@ -59,7 +60,7 @@ enum Pages {
         var html = """
             <section>
               <h2>\(escape(station.name))</h2>
-              <p class="meta">\(feed) · \(summary.playCount) plays logged · \(summary.playlistCount) songs in its playlist</p>
+              <p class="meta">\(feed) · \(summary.playCount) plays logged</p>
             """
         if let latest = summary.recentPlays.first {
             html += "<p class=\"latest\">Latest: <strong>\(escape(latest.artist)) – \(escape(latest.title))</strong> at \(escape(displayTime(latest.playedAt)))</p>"
@@ -141,7 +142,7 @@ enum Pages {
         let token = String(decoding: (try? JSONEncoder().encode(developerToken)) ?? Data("\"\"".utf8), as: UTF8.self)
         let body = """
             <header><p><a href="/">← Radio</a></p><h1>Sign in to Apple Music</h1>
-            <p class="meta">Radio needs permission to add songs to playlists in your library. Apple asks again about every six months.</p></header>
+            <p class="meta">Radio needs permission to add songs to a playlist in your library. Apple asks again about every six months.</p></header>
             <p><button id="signin" disabled>Loading MusicKit…</button></p>
             <p id="result" class="notice" hidden></p>
             <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" data-web-components async></script>
@@ -167,7 +168,7 @@ enum Pages {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ token: userToken }),
                 });
-                show(response.ok ? 'Signed in. Radio will update playlists on its next sync.' : await response.text());
+                show(response.ok ? 'Signed in. Radio will update the playlist on its next sync.' : await response.text());
               } catch (error) {
                 show('Sign-in failed: ' + error);
               }

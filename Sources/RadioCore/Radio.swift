@@ -16,10 +16,12 @@ public struct SyncReport: Sendable {
     public var skippedReason: String?
     public var matched = 0
     public var held = 0
-    public var added: [String: Int] = [:]
-    public var moved: [String: Int] = [:]
+    public var added = 0
+    public var moved = 0
+    /// Songs removed because more recently played songs filled the playlist.
+    public var dropped = 0
     /// Songs whose earlier automatic match the current rules reject, removed
-    /// from playlists to be matched again.
+    /// from the playlist to be matched again.
     public var replaced = 0
     public var error: String?
 }
@@ -35,13 +37,14 @@ public enum AppleMusicState: Equatable, Sendable {
 public struct StationSummary: Sendable {
     public var station: Station
     public var playCount: Int
-    public var playlistCount: Int
     public var recentPlays: [PlayEntry]
+    /// Songs this station's plays added to the playlist.
     public var recentlyAdded: [AddedTrack]
 }
 
 public struct RadioStatus: Sendable {
     public var stations: [StationSummary]
+    public var playlistCount: Int
     public var appleMusic: AppleMusicState
     public var lastSyncAt: Date?
     public var lastSyncError: String?
@@ -58,7 +61,7 @@ public enum ReviewChoice: Sendable {
     case link(String)
 }
 
-/// Polls stations, keeps playlists in sync, and raises alerts.
+/// Polls stations, keeps the playlist in sync, and raises alerts.
 public actor Radio {
     let home: RadioHome
     let store: Store
@@ -68,6 +71,8 @@ public actor Radio {
     let notifier: PushoverNotifier
     let musicApp: MusicApp?
     let now: @Sendable () -> Date
+    /// The playlist keeps this many of the most recently played songs.
+    public nonisolated let playlistLimit: Int
     public nonisolated let dashboardURL: String
     public nonisolated let signInURL: String
 
@@ -85,6 +90,7 @@ public actor Radio {
         sources: [PlaySource],
         notifier: PushoverNotifier,
         musicApp: MusicApp? = nil,
+        playlistLimit: Int = 100,
         dashboardURL: String = "http://jubi.local:8102",
         signInURL: String = "http://localhost:8102/auth",
         now: @escaping @Sendable () -> Date = Date.init
@@ -97,6 +103,7 @@ public actor Radio {
         self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.name, $0) })
         self.notifier = notifier
         self.musicApp = musicApp
+        self.playlistLimit = playlistLimit
         self.dashboardURL = dashboardURL
         self.signInURL = signInURL
         self.now = now
@@ -207,8 +214,8 @@ public actor Radio {
 
     // MARK: Syncing
 
-    /// Matches new songs, adds them to each station's playlist, and moves
-    /// re-played songs to the end. See PlaylistSync.swift.
+    /// Matches new songs, adds them to the playlist, and moves re-played songs
+    /// to the end. See PlaylistSync.swift.
     public func sync() async throws -> SyncReport {
         var report = SyncReport()
         guard let client = try client(requireUser: true) else {
@@ -237,11 +244,7 @@ public actor Radio {
                     report.held += 1
                 }
             }
-            for station in try store.stations() {
-                let result = try await syncPlaylist(for: station, client: client, music: &music)
-                report.added[station.name] = result.added
-                report.moved[station.name] = result.moved
-            }
+            (report.added, report.moved, report.dropped) = try await syncPlaylist(client: client, music: &music)
             try store.setMetaDate("auth.rejected_at", nil)
             try store.setMetaDate("auth.alert_sent_at", nil)
             try store.setMeta("sync.last_error", nil)
@@ -291,7 +294,7 @@ public actor Radio {
         else { return }
         let sent = try await notifier.send(
             title: "Radio: Apple Music sign-in needed",
-            message: "Apple Music rejected Radio's sign-in, so playlists aren't updating. "
+            message: "Apple Music rejected Radio's sign-in, so the playlist isn't updating. "
                 + "On the Mac mini, open \(signInURL) to sign in again.",
             link: signInURL
         )
@@ -309,7 +312,7 @@ public actor Radio {
             let songs = count == 1 ? "1 new song needs" : "\(count) new songs need"
             let sent = try await notifier.send(
                 title: "Radio: songs to review",
-                message: "\(songs) review before \(count == 1 ? "it" : "they") can join a playlist.",
+                message: "\(songs) review before \(count == 1 ? "it" : "they") can join the playlist.",
                 link: "\(dashboardURL)/review"
             )
             guard sent else { return }
@@ -323,7 +326,7 @@ public actor Radio {
         try store.heldSongs()
     }
 
-    /// Resolves a held-back song. The next sync adds it to playlists.
+    /// Resolves a held-back song. The next sync adds it to the playlist.
     public func match(songID: Int64, choice: ReviewChoice) async throws -> CatalogSong {
         guard let song = try store.song(id: songID), song.status == .unmatched || song.status == .ignored else {
             throw RadioError("Song \(songID) isn't waiting for review")
@@ -365,13 +368,13 @@ public actor Radio {
             StationSummary(
                 station: station,
                 playCount: try store.playCount(stationID: station.id),
-                playlistCount: try store.playlistCount(stationID: station.id),
                 recentPlays: try store.recentPlays(stationID: station.id, limit: recentPlays),
                 recentlyAdded: try store.recentlyAdded(stationID: station.id, limit: recentlyAdded)
             )
         }
         return RadioStatus(
             stations: summaries,
+            playlistCount: try store.playlistCount(),
             appleMusic: try appleMusicState(),
             lastSyncAt: try store.metaDate("sync.last_at"),
             lastSyncError: try store.meta("sync.last_error"),

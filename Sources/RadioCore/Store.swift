@@ -6,9 +6,6 @@ public struct Station: Equatable, Sendable {
     public var source: String
     public var feedID: String
     public var name: String
-    public var playlistID: String?
-    /// Music.app's persistent ID for the same playlist.
-    public var musicPlaylistID: String?
     public var lastPollOKAt: Date?
     public var pollFailingSince: Date?
     public var lastPollError: String?
@@ -34,11 +31,29 @@ public struct Song: Equatable, Sendable {
     public var heldAt: Date?
 }
 
-/// A matched song not yet in a station's playlist.
+/// Radio's one Apple Music playlist, which every station feeds.
+struct Playlist {
+    /// The web API's library playlist ID, once Radio has created it.
+    var id: String?
+    /// Music.app's persistent ID for the same playlist.
+    var musicID: String?
+}
+
+/// A matched song not yet in the playlist.
 struct TrackToAdd {
     var songID: Int64
     var catalogID: String
+    /// The station whose play puts the song in the playlist.
+    var stationID: Int64
     var latestPlay: String
+}
+
+/// A playlist entry for a song no longer among the most recently played.
+struct TrackToDrop {
+    var catalogID: String
+    var catalogName: String?
+    var catalogArtist: String?
+    var addedAt: Date
 }
 
 /// A playlist entry whose song has played since the entry was placed.
@@ -88,71 +103,82 @@ final class Store {
         try migrate()
     }
 
+    /// The schema version `migrate` produces.
+    private static let schemaVersion: Int64 = 3
+
+    /// Both LaunchAgents open the database at once after a deploy, so the
+    /// version is read again inside the write lock and only one migrates.
     private func migrate() throws {
-        let version = try db.query("PRAGMA user_version").first?.int("user_version") ?? 0
-        if version < 1 { try createSchemaOne() }
-        if version < 2 { try migrateToSchemaTwo() }
+        guard try userVersion() < Self.schemaVersion else { return }
+        try db.transaction {
+            let version = try userVersion()
+            if version < 1 { try createSchemaOne() }
+            if version < 2 { try migrateToSchemaTwo() }
+            if version < 3 { try migrateToSchemaThree() }
+        }
+    }
+
+    private func userVersion() throws -> Int64 {
+        try db.query("PRAGMA user_version").first?.int("user_version") ?? 0
     }
 
     private func createSchemaOne() throws {
-        try db.transaction {
-            try db.execute("""
-                CREATE TABLE stations (
-                    id INTEGER PRIMARY KEY,
-                    slug TEXT NOT NULL UNIQUE,
-                    source TEXT NOT NULL,
-                    feed_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    playlist_id TEXT,
-                    added_at TEXT NOT NULL,
-                    last_poll_ok_at TEXT,
-                    poll_failing_since TEXT,
-                    last_poll_error TEXT,
-                    feed_alert_sent_at TEXT
-                )
-                """)
-            try db.execute("""
-                CREATE TABLE songs (
-                    id INTEGER PRIMARY KEY,
-                    key TEXT NOT NULL UNIQUE,
-                    artist TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'pending'
-                        CHECK (status IN ('pending', 'matched', 'unmatched', 'ignored')),
-                    catalog_id TEXT,
-                    catalog_url TEXT,
-                    matched_by TEXT,
-                    candidates TEXT,
-                    first_heard_at TEXT NOT NULL,
-                    held_at TEXT,
-                    resolved_at TEXT
-                )
-                """)
-            try db.execute("""
-                CREATE TABLE plays (
-                    station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
-                    play_id TEXT NOT NULL,
-                    played_at TEXT NOT NULL,
-                    artist TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    song_id INTEGER NOT NULL REFERENCES songs(id),
-                    PRIMARY KEY (station_id, play_id)
-                )
-                """)
-            try db.execute("CREATE INDEX plays_by_time ON plays (station_id, played_at)")
-            try db.execute("CREATE INDEX plays_by_song ON plays (song_id)")
-            try db.execute("""
-                CREATE TABLE playlist_tracks (
-                    station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
-                    catalog_id TEXT NOT NULL,
-                    song_id INTEGER NOT NULL REFERENCES songs(id),
-                    added_at TEXT NOT NULL,
-                    PRIMARY KEY (station_id, catalog_id)
-                )
-                """)
-            try db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-            try db.execute("PRAGMA user_version = 1")
-        }
+        try db.execute("""
+            CREATE TABLE stations (
+                id INTEGER PRIMARY KEY,
+                slug TEXT NOT NULL UNIQUE,
+                source TEXT NOT NULL,
+                feed_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                playlist_id TEXT,
+                added_at TEXT NOT NULL,
+                last_poll_ok_at TEXT,
+                poll_failing_since TEXT,
+                last_poll_error TEXT,
+                feed_alert_sent_at TEXT
+            )
+            """)
+        try db.execute("""
+            CREATE TABLE songs (
+                id INTEGER PRIMARY KEY,
+                key TEXT NOT NULL UNIQUE,
+                artist TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'matched', 'unmatched', 'ignored')),
+                catalog_id TEXT,
+                catalog_url TEXT,
+                matched_by TEXT,
+                candidates TEXT,
+                first_heard_at TEXT NOT NULL,
+                held_at TEXT,
+                resolved_at TEXT
+            )
+            """)
+        try db.execute("""
+            CREATE TABLE plays (
+                station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+                play_id TEXT NOT NULL,
+                played_at TEXT NOT NULL,
+                artist TEXT NOT NULL,
+                title TEXT NOT NULL,
+                song_id INTEGER NOT NULL REFERENCES songs(id),
+                PRIMARY KEY (station_id, play_id)
+            )
+            """)
+        try db.execute("CREATE INDEX plays_by_time ON plays (station_id, played_at)")
+        try db.execute("CREATE INDEX plays_by_song ON plays (song_id)")
+        try db.execute("""
+            CREATE TABLE playlist_tracks (
+                station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+                catalog_id TEXT NOT NULL,
+                song_id INTEGER NOT NULL REFERENCES songs(id),
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (station_id, catalog_id)
+            )
+            """)
+        try db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        try db.execute("PRAGMA user_version = 1")
     }
 
     /// Adds what moving and replacing playlist entries needs: catalog titles
@@ -160,19 +186,38 @@ final class Store {
     /// each entry's position reflects. Existing entries were placed at their
     /// song's first play.
     private func migrateToSchemaTwo() throws {
-        try db.transaction {
-            try db.execute("ALTER TABLE songs ADD COLUMN catalog_name TEXT")
-            try db.execute("ALTER TABLE songs ADD COLUMN catalog_artist TEXT")
-            try db.execute("ALTER TABLE songs ADD COLUMN catalog_album TEXT")
-            try db.execute("ALTER TABLE stations ADD COLUMN music_playlist_id TEXT")
-            try db.execute("ALTER TABLE playlist_tracks ADD COLUMN position_played_at TEXT")
-            try db.execute("""
-                UPDATE playlist_tracks SET position_played_at = (
-                    SELECT MIN(p.played_at) FROM plays p
-                    WHERE p.station_id = playlist_tracks.station_id AND p.song_id = playlist_tracks.song_id)
-                """)
-            try db.execute("PRAGMA user_version = 2")
-        }
+        try db.execute("ALTER TABLE songs ADD COLUMN catalog_name TEXT")
+        try db.execute("ALTER TABLE songs ADD COLUMN catalog_artist TEXT")
+        try db.execute("ALTER TABLE songs ADD COLUMN catalog_album TEXT")
+        try db.execute("ALTER TABLE stations ADD COLUMN music_playlist_id TEXT")
+        try db.execute("ALTER TABLE playlist_tracks ADD COLUMN position_played_at TEXT")
+        try db.execute("""
+            UPDATE playlist_tracks SET position_played_at = (
+                SELECT MIN(p.played_at) FROM plays p
+                WHERE p.station_id = playlist_tracks.station_id AND p.song_id = playlist_tracks.song_id)
+            """)
+        try db.execute("PRAGMA user_version = 2")
+    }
+
+    /// Replaces each station's playlist with one playlist for every station.
+    /// The API can't move entries between playlists, so the new playlist
+    /// starts empty for the next sync to fill, and the old ones stay in Music.
+    /// Each entry remembers the station that added it, for the dashboard.
+    private func migrateToSchemaThree() throws {
+        try db.execute("DROP TABLE playlist_tracks")
+        try db.execute("""
+            CREATE TABLE playlist_tracks (
+                catalog_id TEXT PRIMARY KEY,
+                song_id INTEGER NOT NULL REFERENCES songs(id),
+                station_id INTEGER REFERENCES stations(id) ON DELETE SET NULL,
+                added_at TEXT NOT NULL,
+                position_played_at TEXT
+            )
+            """)
+        try db.execute("CREATE INDEX playlist_tracks_by_station ON playlist_tracks (station_id, added_at)")
+        try db.execute("ALTER TABLE stations DROP COLUMN playlist_id")
+        try db.execute("ALTER TABLE stations DROP COLUMN music_playlist_id")
+        try db.execute("PRAGMA user_version = 3")
     }
 
     // MARK: Stations
@@ -221,23 +266,6 @@ final class Store {
         try db.execute("UPDATE stations SET feed_alert_sent_at = ? WHERE id = ?", [.text(iso(date)), .integer(stationID)])
     }
 
-    func setPlaylist(stationID: Int64, playlistID: String?) throws {
-        try db.execute(
-            "UPDATE stations SET playlist_id = ? WHERE id = ?",
-            [playlistID.map(SQLValue.text) ?? .null, .integer(stationID)]
-        )
-        if playlistID == nil {
-            try db.execute("DELETE FROM playlist_tracks WHERE station_id = ?", [.integer(stationID)])
-        }
-    }
-
-    func setMusicPlaylist(stationID: Int64, musicPlaylistID: String?) throws {
-        try db.execute(
-            "UPDATE stations SET music_playlist_id = ? WHERE id = ?",
-            [musicPlaylistID.map(SQLValue.text) ?? .null, .integer(stationID)]
-        )
-    }
-
     private func station(from row: Row) -> Station {
         Station(
             id: row.int("id")!,
@@ -245,8 +273,6 @@ final class Store {
             source: row.string("source")!,
             feedID: row.string("feed_id")!,
             name: row.string("name")!,
-            playlistID: row.string("playlist_id"),
-            musicPlaylistID: row.string("music_playlist_id"),
             lastPollOKAt: row.string("last_poll_ok_at").flatMap(parseISODate),
             pollFailingSince: row.string("poll_failing_since").flatMap(parseISODate),
             lastPollError: row.string("last_poll_error"),
@@ -282,8 +308,7 @@ final class Store {
         try db.query(
             """
             SELECT p.played_at, p.artist, p.title, s.status, s.catalog_url,
-                EXISTS (SELECT 1 FROM playlist_tracks t
-                        WHERE t.station_id = p.station_id AND t.song_id = p.song_id) AS added
+                EXISTS (SELECT 1 FROM playlist_tracks t WHERE t.song_id = p.song_id) AS added
             FROM plays p JOIN songs s ON s.id = p.song_id
             WHERE p.station_id = ? ORDER BY p.played_at DESC LIMIT ?
             """,
@@ -435,54 +460,105 @@ final class Store {
         )
     }
 
-    // MARK: Playlists
+    // MARK: Playlist
 
-    /// Matched songs a station has played that aren't in its playlist yet,
-    /// in the order of their latest plays.
-    func songsToAdd(stationID: Int64) throws -> [TrackToAdd] {
-        try db.query(
-            """
-            SELECT s.id, s.catalog_id, MAX(p.played_at) AS latest_played
-            FROM plays p JOIN songs s ON s.id = p.song_id
-            WHERE p.station_id = ? AND s.status = 'matched'
-                AND NOT EXISTS (SELECT 1 FROM playlist_tracks t
-                                WHERE t.station_id = p.station_id AND t.catalog_id = s.catalog_id)
-            GROUP BY s.catalog_id ORDER BY latest_played, s.id
-            """,
-            [.integer(stationID)]
-        ).map { TrackToAdd(songID: $0.int("id")!, catalogID: $0.string("catalog_id")!, latestPlay: $0.string("latest_played")!) }
+    func playlist() throws -> Playlist {
+        Playlist(id: try meta("playlist.id"), musicID: try meta("playlist.music_id"))
     }
 
-    func recordAdded(stationID: Int64, tracks: [TrackToAdd], at date: Date) throws {
+    /// Clearing the ID, when the playlist was deleted in Music, also forgets
+    /// its entries so the next sync recreates it with every song.
+    func setPlaylistID(_ id: String?) throws {
+        try db.transaction {
+            try setMeta("playlist.id", id)
+            if id == nil {
+                try setMeta("playlist.music_id", nil)
+                try db.execute("DELETE FROM playlist_tracks")
+            }
+        }
+    }
+
+    func setMusicPlaylistID(_ id: String?) throws {
+        try setMeta("playlist.music_id", id)
+    }
+
+    /// The `limit` matched songs played most recently on any station, which
+    /// are the songs the playlist should hold. SQLite takes the bare columns
+    /// from the row that has the MAX, so each song's station is the one that
+    /// played it last.
+    private static let recentSongs = """
+        recent AS (
+            SELECT s.id AS song_id, s.catalog_id, p.station_id, MAX(p.played_at) AS latest_played
+            FROM plays p JOIN songs s ON s.id = p.song_id
+            WHERE s.status = 'matched'
+            GROUP BY s.catalog_id ORDER BY latest_played DESC, s.catalog_id DESC LIMIT ?
+        )
+        """
+
+    /// Recently played songs that aren't in the playlist yet, in the order of
+    /// their latest plays.
+    func songsToAdd(limit: Int) throws -> [TrackToAdd] {
+        try db.query(
+            """
+            WITH \(Self.recentSongs)
+            SELECT r.song_id, r.catalog_id, r.station_id, r.latest_played FROM recent r
+            WHERE NOT EXISTS (SELECT 1 FROM playlist_tracks t WHERE t.catalog_id = r.catalog_id)
+            ORDER BY r.latest_played, r.song_id
+            """,
+            [.integer(Int64(limit))]
+        ).map {
+            TrackToAdd(songID: $0.int("song_id")!, catalogID: $0.string("catalog_id")!,
+                       stationID: $0.int("station_id")!, latestPlay: $0.string("latest_played")!)
+        }
+    }
+
+    /// Entries for songs outside the `limit` most recently played, least
+    /// recently placed first.
+    func tracksToDrop(limit: Int) throws -> [TrackToDrop] {
+        try db.query(
+            """
+            WITH \(Self.recentSongs)
+            SELECT t.catalog_id, t.added_at, s.catalog_name, s.catalog_artist
+            FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
+            WHERE t.catalog_id NOT IN (SELECT catalog_id FROM recent)
+            ORDER BY t.position_played_at, t.rowid
+            """,
+            [.integer(Int64(limit))]
+        ).map {
+            TrackToDrop(catalogID: $0.string("catalog_id")!, catalogName: $0.string("catalog_name"),
+                        catalogArtist: $0.string("catalog_artist"), addedAt: parseISODate($0.string("added_at")!)!)
+        }
+    }
+
+    func recordAdded(_ tracks: [TrackToAdd], at date: Date) throws {
         try db.transaction {
             for track in tracks {
                 try db.execute(
                     """
-                    INSERT OR IGNORE INTO playlist_tracks (station_id, catalog_id, song_id, added_at, position_played_at)
+                    INSERT OR IGNORE INTO playlist_tracks (catalog_id, song_id, station_id, added_at, position_played_at)
                     VALUES (?, ?, ?, ?, ?)
                     """,
-                    [.integer(stationID), .text(track.catalogID), .integer(track.songID), .text(iso(date)), .text(track.latestPlay)]
+                    [.text(track.catalogID), .integer(track.songID), .integer(track.stationID), .text(iso(date)),
+                     .text(track.latestPlay)]
                 )
             }
         }
     }
 
-    /// Entries whose song has played again since the entry was placed, in the
-    /// order of those plays.
-    func tracksToMove(stationID: Int64) throws -> [TrackToMove] {
+    /// Entries whose song has played again, on any station, since the entry
+    /// was placed, in the order of those plays.
+    func tracksToMove() throws -> [TrackToMove] {
         try db.query(
             """
             SELECT t.song_id, t.catalog_id, t.added_at, s.catalog_name, s.catalog_artist,
                 MAX(p.played_at) AS latest_played
             FROM playlist_tracks t
             JOIN songs s ON s.catalog_id = t.catalog_id AND s.status = 'matched'
-            JOIN plays p ON p.song_id = s.id AND p.station_id = t.station_id
-            WHERE t.station_id = ?
+            JOIN plays p ON p.song_id = s.id
             GROUP BY t.catalog_id
             HAVING latest_played > COALESCE(t.position_played_at, '')
             ORDER BY latest_played
-            """,
-            [.integer(stationID)]
+            """
         ).map {
             TrackToMove(songID: $0.int("song_id")!, catalogID: $0.string("catalog_id")!,
                         catalogName: $0.string("catalog_name"), catalogArtist: $0.string("catalog_artist"),
@@ -490,30 +566,28 @@ final class Store {
         }
     }
 
-    func setPosition(stationID: Int64, catalogID: String, playedAt: String) throws {
+    func setPosition(catalogID: String, playedAt: String) throws {
         try db.execute(
-            "UPDATE playlist_tracks SET position_played_at = ? WHERE station_id = ? AND catalog_id = ?",
-            [.text(playedAt), .integer(stationID), .text(catalogID)]
+            "UPDATE playlist_tracks SET position_played_at = ? WHERE catalog_id = ?",
+            [.text(playedAt), .text(catalogID)]
         )
     }
 
-    /// Entries for a catalog song, across every station's playlist.
-    func entries(catalogID: String) throws -> [(stationID: Int64, addedAt: Date)] {
-        try db.query("SELECT station_id, added_at FROM playlist_tracks WHERE catalog_id = ?", [.text(catalogID)])
-            .map { ($0.int("station_id")!, parseISODate($0.string("added_at")!)!) }
+    /// When a catalog song's entry was added, or nil if it isn't in the playlist.
+    func entryAddedAt(catalogID: String) throws -> Date? {
+        try db.query("SELECT added_at FROM playlist_tracks WHERE catalog_id = ?", [.text(catalogID)])
+            .first.flatMap { $0.string("added_at").flatMap(parseISODate) }
     }
 
-    func removePlaylistTrack(stationID: Int64, catalogID: String) throws {
-        try db.execute(
-            "DELETE FROM playlist_tracks WHERE station_id = ? AND catalog_id = ?",
-            [.integer(stationID), .text(catalogID)]
-        )
+    func removePlaylistTrack(catalogID: String) throws {
+        try db.execute("DELETE FROM playlist_tracks WHERE catalog_id = ?", [.text(catalogID)])
     }
 
-    func playlistCount(stationID: Int64) throws -> Int {
-        Int(try db.query("SELECT COUNT(*) AS n FROM playlist_tracks WHERE station_id = ?", [.integer(stationID)]).first!.int("n")!)
+    func playlistCount() throws -> Int {
+        Int(try db.query("SELECT COUNT(*) AS n FROM playlist_tracks").first!.int("n")!)
     }
 
+    /// Songs a station's plays added to the playlist, newest first.
     func recentlyAdded(stationID: Int64, limit: Int) throws -> [AddedTrack] {
         try db.query(
             """

@@ -13,7 +13,7 @@ import Testing
         #expect(harness.music.playlists().isEmpty)
     }
 
-    @Test func firstSyncCreatesAPlaylistNamedAfterTheStationInOrderOfLatestPlay() async throws {
+    @Test func firstSyncCreatesOneRadioPlaylistInOrderOfLatestPlay() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
@@ -26,8 +26,8 @@ import Testing
 
         let report = try await harness.radio.sync()
 
-        #expect(report.added == ["Alt 102.1": 2])
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Africa", "My Hero"]])
+        #expect(report.added == 2)
+        #expect(harness.music.playlists() == ["Radio": ["Africa", "My Hero"]])
     }
 
     @Test func laterSyncsAppendOnlyNewSongs() async throws {
@@ -44,23 +44,27 @@ import Testing
         harness.play("Weezer", "Africa")
         _ = try await harness.radio.run()
 
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Glycerine", "Africa"]])
+        #expect(harness.music.playlists() == ["Radio": ["Glycerine", "Africa"]])
     }
 
-    @Test func eachStationGetsItsOwnPlaylistAndSharedSongsAreSearchedOnce() async throws {
+    @Test func everyStationFeedsTheOneRadioPlaylistAndSharedSongsAreSearchedOnce() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
         _ = try await harness.radio.addStation(slug: "rock")
         harness.music.addToCatalog("Foo Fighters", "Everlong")
         harness.music.addToCatalog("Muse", "Uprising")
-        harness.play("Foo Fighters", "Everlong", on: "101-1041", minutesAgo: 2)
-        harness.play("Muse", "Uprising", on: "101-1041")
-        harness.play("Foo Fighters", "Everlong", on: "101-2000")
+        harness.play("Foo Fighters", "Everlong", on: "101-1041", minutesAgo: 6)
+        harness.play("Muse", "Uprising", on: "101-1041", minutesAgo: 4)
+        harness.play("Foo Fighters", "Everlong", on: "101-2000", minutesAgo: 2)
         _ = try await harness.radio.run()
 
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Everlong", "Uprising"], "Rock 99": ["Everlong"]])
+        #expect(harness.music.playlistNames() == ["Radio"])
+        #expect(harness.music.playlists() == ["Radio": ["Uprising", "Everlong"]])
         #expect(harness.http.requests("GET https://api.music.apple.com/v1/catalog/us/search").count == 2)
+        // Each song counts as added by the station whose play placed it.
+        let stations = try await harness.radio.status().stations
+        #expect(stations.map { $0.recentlyAdded.map(\.title) } == [["Uprising"], ["Everlong"]])
     }
 
     @Test func uncertainSongsAreHeldBackWithCandidates() async throws {
@@ -90,7 +94,7 @@ import Testing
         _ = try await harness.radio.match(songID: held.id, choice: .candidate(0))
         _ = try await harness.radio.sync()
 
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Come As You Are (Live)"]])
+        #expect(harness.music.playlists() == ["Radio": ["Come As You Are (Live)"]])
         #expect(try await harness.radio.heldSongs().isEmpty)
     }
 
@@ -106,7 +110,7 @@ import Testing
         _ = try await harness.radio.match(songID: held.id, choice: .link(chosen.url))
         _ = try await harness.radio.sync()
 
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Self-Aware"]])
+        #expect(harness.music.playlists() == ["Radio": ["Self-Aware"]])
     }
 
     @Test func ignoredSongsAreNeverAdded() async throws {
@@ -141,10 +145,10 @@ import Testing
         _ = try await harness.radio.run()
         _ = try await harness.radio.sync()
 
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Africa", "Glycerine"]])
+        #expect(harness.music.playlists() == ["Radio": ["Africa", "Glycerine"]])
     }
 
-    @Test func largeBacklogsAreAddedInBatches() async throws {
+    @Test func aLargeBacklogFillsThePlaylistWithTheHundredLatestSongs() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
@@ -161,8 +165,8 @@ import Testing
 
         _ = try await harness.radio.sync()
 
-        let playlist = try #require(harness.music.playlists()["Alt 102.1"])
-        #expect(playlist == (0..<120).map { "Song \($0)" })
+        let playlist = try #require(harness.music.playlists()["Radio"])
+        #expect(playlist == (20..<120).map { "Song \($0)" })
     }
 }
 
@@ -189,8 +193,8 @@ import Testing
         async let b = second.sync()
         let reports = try await [a, b]
 
-        #expect(first.music.playlistNames() == ["Alt 102.1"])
-        #expect(first.music.playlists()["Alt 102.1"] == (0..<5).map { "Song \($0)" })
+        #expect(first.music.playlistNames() == ["Radio"])
+        #expect(first.music.playlists()["Radio"] == (0..<5).map { "Song \($0)" })
         #expect(reports.filter { $0.skippedReason != nil }.count == 1)
     }
 }

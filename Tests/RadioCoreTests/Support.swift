@@ -282,7 +282,7 @@ struct Harness {
     let home: RadioHome
     let radio: Radio
 
-    init(pushover: Bool = true, http: FakeHTTP = FakeHTTP()) throws {
+    init(pushover: Bool = true, playlistLimit: Int = 100, http: FakeHTTP = FakeHTTP()) throws {
         self.http = http
         audacy = FakeAudacy(http: http)
         music = FakeAppleMusic(http: http)
@@ -297,6 +297,7 @@ struct Harness {
             sources: [AudacySource(http: http)],
             notifier: PushoverNotifier(http: http, userKey: pushover ? "user" : nil, apiKey: pushover ? "app" : nil),
             musicApp: musicApp,
+            playlistLimit: playlistLimit,
             now: { clock.now }
         )
     }

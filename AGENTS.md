@@ -32,8 +32,8 @@ Project Starter manages this block; add project rules after it.
 
 ## Project
 
-- Radio follows radio stations and builds Apple Music playlists from the songs
-  each station has played. It is a dependency-free Swift package (macOS 26+,
+- Radio follows radio stations and builds one Apple Music playlist from the
+  songs they play. It is a dependency-free Swift package (macOS 26+,
   Swift 6.2+); `bin/check-application` builds and tests it, and CI cannot, so
   run `bin/check --full` locally before merging. Commands, versions, and
   deployment (`bin/deploy`) are in
