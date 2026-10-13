@@ -190,7 +190,7 @@ func main(_ arguments: [String]) async throws -> Int32 {
         print("Songs to review: \(status.heldCount)")
         if let error = status.musicAppError { print("Music.app: \(error)") }
         print("Playlist \"\(Radio.playlistName)\": \(status.playlistCount) of \(radio.playlistLimit) songs")
-        print("Playlist \"\(Radio.archivePlaylistName)\": \(status.archiveCount) songs")
+        print("Playlist \"\(Radio.archivePlaylistName)\": \(status.archiveCount) of \(radio.archiveLimit) songs")
         for summary in status.stations {
             let station = summary.station
             let feed = station.pollFailingSince.map { "failing since \(displayTime($0)): \(station.lastPollError ?? "")" }

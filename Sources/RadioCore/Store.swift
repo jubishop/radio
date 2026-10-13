@@ -37,7 +37,7 @@ struct Playlist {
     enum Kind: String, CaseIterable {
         /// "Radio": the most recently played songs.
         case recent
-        /// "Radio Archive": every song.
+        /// "Radio Archive": many more of them.
         case archive
     }
 
@@ -230,7 +230,7 @@ final class Store {
         try db.execute("PRAGMA user_version = 3")
     }
 
-    /// Adds "Radio Archive", which keeps every song. Each playlist's IDs move
+    /// Adds "Radio Archive", a second, larger playlist. Each playlist's IDs move
     /// from meta to a row of `playlists`, and each entry records which
     /// playlist it's in. The archive starts empty for the next sync to fill.
     private func migrateToSchemaFour() throws {
@@ -529,8 +529,8 @@ final class Store {
         try db.execute("UPDATE playlists SET music_id = ? WHERE kind = ?", [id.map(SQLValue.text) ?? .null, .text(kind.rawValue)])
     }
 
-    /// The matched songs played most recently on any station, at most the
-    /// bound limit, where -1 means no limit. SQLite takes the bare columns
+    /// The matched songs played most recently on any station, up to the bound
+    /// limit. SQLite takes the bare columns
     /// from the row that has the MAX, so each song's station is the one that
     /// played it last.
     private static let recentSongs = """
@@ -542,9 +542,9 @@ final class Store {
         )
         """
 
-    /// Songs that belong in a playlist but aren't in it yet, in the order of
-    /// their latest plays. A nil limit means every matched song.
-    func songsToAdd(to kind: Playlist.Kind, limit: Int?) throws -> [TrackToAdd] {
+    /// The `limit` most recently played songs that aren't in a playlist yet,
+    /// in the order of their latest plays.
+    func songsToAdd(to kind: Playlist.Kind, limit: Int) throws -> [TrackToAdd] {
         try db.query(
             """
             WITH \(Self.recentSongs)
@@ -552,7 +552,7 @@ final class Store {
             WHERE NOT EXISTS (SELECT 1 FROM playlist_tracks t WHERE t.playlist = ? AND t.catalog_id = r.catalog_id)
             ORDER BY r.latest_played, r.song_id
             """,
-            [.integer(Int64(limit ?? -1)), .text(kind.rawValue)]
+            [.integer(Int64(limit)), .text(kind.rawValue)]
         ).map {
             TrackToAdd(songID: $0.int("song_id")!, catalogID: $0.string("catalog_id")!,
                        stationID: $0.int("station_id")!, latestPlay: $0.string("latest_played")!)

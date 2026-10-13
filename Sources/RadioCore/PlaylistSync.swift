@@ -7,12 +7,11 @@ struct MusicAppSession {
     var succeeded = false
 }
 
-/// Keeps Radio's playlists in order of each song's latest play on any
-/// station. "Radio" holds only the most recently played songs, and
-/// "Radio Archive" holds every song. New songs are added through the web API.
-/// Re-played songs are moved to the end, and songs that fall out of "Radio"
-/// are dropped, through Music.app, the only interface that can remove an
-/// entry.
+/// Keeps Radio's playlists to the most recently played songs, in order of
+/// each song's latest play on any station: a few in "Radio" and many more in
+/// "Radio Archive". New songs are added through the web API. Re-played songs
+/// are moved to the end, and songs that fall past a playlist's limit are
+/// dropped, through Music.app, the only interface that can remove an entry.
 extension Radio {
     public static let playlistName = "Radio"
     public static let archivePlaylistName = "Radio Archive"
@@ -29,10 +28,12 @@ extension Radio {
         }
     }
 
-    /// How many songs a playlist keeps, or nil for the archive, which grows
-    /// until it reaches Apple's own limits.
-    func limit(of kind: Playlist.Kind) -> Int? {
-        kind == .recent ? playlistLimit : nil
+    /// How many of the most recently played songs a playlist keeps.
+    func limit(of kind: Playlist.Kind) -> Int {
+        switch kind {
+        case .recent: playlistLimit
+        case .archive: archiveLimit
+        }
     }
 
     /// Records catalog titles for matches saved before Radio stored them,
@@ -72,7 +73,7 @@ extension Radio {
         return replaced
     }
 
-    /// Syncs "Radio" before the archive, so trouble in the ever-growing
+    /// Syncs "Radio" before the archive, so trouble in the much larger
     /// archive can't hold it up. Returns the changes by playlist name.
     func syncPlaylists(client: AppleMusicClient, music: inout MusicAppSession) async throws -> [String: PlaylistChanges] {
         var changes: [String: PlaylistChanges] = [:]
@@ -90,8 +91,8 @@ extension Radio {
                               music: inout MusicAppSession) async throws -> PlaylistChanges {
         var playlist = try store.playlist(kind)
         var changes = PlaylistChanges()
-        if let limit = limit(of: kind), musicApp != nil {
-            for track in try store.tracksToDrop(from: kind, limit: limit) {
+        if musicApp != nil {
+            for track in try store.tracksToDrop(from: kind, limit: limit(of: kind)) {
                 guard let name = track.catalogName, let artist = track.catalogArtist else { continue }
                 if try await removeEntry(catalogID: track.catalogID, name: name, artist: artist, addedAt: track.addedAt,
                                          playlist: &playlist, music: &music) {
@@ -132,10 +133,10 @@ extension Radio {
                 return false
             }
         } else {
-            let songs = limit(of: playlist.kind).map { "The \($0) songs played most recently" } ?? "Every song played"
+            let limit = limit(of: playlist.kind).formatted()
             let created = try await client.createPlaylist(
                 name: name(of: playlist.kind),
-                description: "\(songs) on the stations Radio follows, most recent last.",
+                description: "The \(limit) songs played most recently on the stations Radio follows, most recent last.",
                 songIDs: tracks.map(\.catalogID)
             )
             try store.setPlaylistID(created, for: playlist.kind)

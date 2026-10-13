@@ -81,6 +81,8 @@ public actor Radio {
     let now: @Sendable () -> Date
     /// "Radio" keeps this many of the most recently played songs.
     public nonisolated let playlistLimit: Int
+    /// "Radio Archive" keeps this many.
+    public nonisolated let archiveLimit: Int
     public nonisolated let dashboardURL: String
     public nonisolated let signInURL: String
 
@@ -99,6 +101,7 @@ public actor Radio {
         notifier: PushoverNotifier,
         musicApp: MusicApp? = nil,
         playlistLimit: Int = 100,
+        archiveLimit: Int = 10_000,
         dashboardURL: String = "http://jubi.local:8102",
         signInURL: String = "http://localhost:8102/auth",
         now: @escaping @Sendable () -> Date = Date.init
@@ -112,6 +115,7 @@ public actor Radio {
         self.notifier = notifier
         self.musicApp = musicApp
         self.playlistLimit = playlistLimit
+        self.archiveLimit = archiveLimit
         self.dashboardURL = dashboardURL
         self.signInURL = signInURL
         self.now = now

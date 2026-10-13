@@ -4,8 +4,8 @@ import SQLite3
 import Testing
 
 @Suite struct MusicAppTests {
-    func harnessWithSongs(_ titles: [String], playlistLimit: Int = 100) async throws -> Harness {
-        let harness = try Harness(playlistLimit: playlistLimit)
+    func harnessWithSongs(_ titles: [String], playlistLimit: Int = 100, archiveLimit: Int = 10_000) async throws -> Harness {
+        let harness = try Harness(playlistLimit: playlistLimit, archiveLimit: archiveLimit)
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
         for (index, title) in titles.enumerated() {
@@ -70,6 +70,18 @@ import Testing
         #expect(sync.playlists["Radio Archive"]?.moved == 1)
         let status = try await harness.radio.status()
         #expect((status.playlistCount, status.archiveCount) == (3, 4))
+    }
+
+    @Test func theArchiveDropsTheLeastRecentlyPlayedSongsPastItsLimit() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 2, archiveLimit: 3)
+        #expect(harness.music.playlists() == ["Radio": ["C", "D"], "Radio Archive": ["B", "C", "D"]])
+
+        harness.music.addToCatalog("Band", "E")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "E")
+        let (_, sync) = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["D", "E"], "Radio Archive": ["C", "D", "E"]])
+        #expect(sync.playlists["Radio Archive"]?.dropped == 1)
     }
 
     @Test func aReplayKeepsASongInAFullPlaylist() async throws {

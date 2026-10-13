@@ -6,7 +6,8 @@ status: current
 
 Radio logs each song its stations play, starting with Alt 102.1 (WRXL,
 Richmond). It keeps the 100 most recently played in an Apple Music playlist
-named "Radio", and every song in "Radio Archive". This page records the
+named "Radio", and the 10,000 most recently played in "Radio Archive". This
+page records the
 accepted decisions, the constraints they rest on, and the questions still
 open. Feed details are in
 [Audacy now-playing feed](audacy-now-playing-feed.md).
@@ -27,9 +28,11 @@ open. Feed details are in
   [Apple Community thread](https://discussions.apple.com/thread/253717041),
   a user reported that a playlist stopped at 50,000 songs: songs added past
   that appeared at first, then disappeared without an error. Apple hasn't
-  confirmed this. "Radio" holds at most 100 songs, but "Radio Archive" and
-  the library grow with every new song a station plays. On 2026-10-13,
-  Radio's first five hours on one station logged 66 plays of 64 songs.
+  confirmed this. "Radio" holds at most 100 songs and "Radio Archive" at
+  most 10,000, but songs they drop stay in the library, so the library grows
+  with every new song a station plays. On 2026-10-13, the library held 3,787
+  songs, and Radio's first five hours on one station logged 66 plays of 64
+  songs.
 
 ## Decisions
 
@@ -219,12 +222,14 @@ so a re-played song stays. Radio drops songs through Music.app, the same way
 it moves them, and a dropped song returns when a station plays it again.
 Dropped songs stay in the library.
 
-### Also keep every song in "Radio Archive"
+### Add a larger "Radio Archive" playlist
 
 Accepted 2026-10-13. The user asked for a second playlist, "Radio Archive",
-that grows until it reaches Apple's size limit. It holds each song once, and a
-re-played song moves to its end, as in "Radio". Radio syncs "Radio" first, so
-trouble in the archive can't stop it from updating.
+that grows until it reaches Apple's size limit, until a
+[later decision](#cap-radio-archive-at-10000-songs) the same day capped it.
+It holds each song once, and a re-played song moves to its end, as in
+"Radio". Radio syncs "Radio" first, so trouble in the archive can't stop it
+from updating.
 
 The user also considered removing the cap from "Radio" and building a smart
 playlist of its 100 most recently added songs, and chose the archive instead.
@@ -233,6 +238,13 @@ library, according to user reports; no Apple documentation was found
 (searched 2026-10-13). Moving a re-played song wouldn't change that date, and
 a song already in the library before Radio added it would never count as
 recent.
+
+### Cap "Radio Archive" at 10,000 songs
+
+Accepted 2026-10-13. This replaces the archive's growth to Apple's limit.
+After learning that the library held 3,787 of its 100,000 songs, the user
+asked to cap the archive at 10,000. It drops its least recently played songs
+the same way "Radio" does.
 
 ### Prefer explicit versions
 
@@ -338,10 +350,10 @@ explicitly approved them.
 - **Upgrading to the archive:** the first sync after the upgrade creates
   "Radio Archive" with every matched song, in order of latest play. "Radio"
   keeps its entries.
-- **Dropping songs:** each sync first drops, through Music.app, every "Radio"
-  entry outside the 100 most recently played songs, and then adds and moves.
-  When Music.app can't drop them, new songs are still added, and "Radio"
-  passes 100 until Music.app works. An entry to drop that Music.app can't
+- **Dropping songs:** for each playlist, each sync first drops, through
+  Music.app, every entry outside its limit of most recently played songs, and
+  then adds and moves. When Music.app can't drop them, new songs are still
+  added, and the playlist passes its limit until Music.app works. An entry to drop that Music.app can't
   find is retried for an hour, like a move, and then forgotten.
 - **Station credit:** a song added to "Radio" is credited to the station
   whose play placed it, which is its latest play at that time. The
@@ -377,10 +389,4 @@ explicitly approved them.
 
 ## Open questions
 
-- **What should happen when "Radio Archive" reaches Apple's limit?** The
-  user wants it to run to the limit, and nothing handles the limit yet. If
-  Apple silently drops songs past the limit, Radio would count them as added.
-  If the API returns an error, the archive's part of each sync would fail
-  after "Radio" had synced, and the dashboard would show the error. A 403
-  would be mistaken for an expired sign-in and would send a false alert after
-  an hour.
+None remain.

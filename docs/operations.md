@@ -51,7 +51,8 @@ station feeds. Run `radio sync` to do it immediately.
   shuffling it plays what the stations played lately. When a new song joins,
   the least recently played one leaves the playlist but stays in your
   library.
-- **Radio Archive** holds every song the stations have played.
+- **Radio Archive** holds the 10,000 songs played most recently, and drops
+  the oldest the same way.
 
 Both playlists end with the most recently played song. Sort one by
 **Playlist Order, descending** to see it newest first.
@@ -91,7 +92,7 @@ Earlier releases gave each station its own playlist, such as "Alt 102.1". The
 first sync after upgrading creates "Radio" with the 100 most recently played
 matched songs, in order of latest play. The old playlists stop changing;
 delete them in Music when you no longer want them. A later upgrade adds
-"Radio Archive" the same way, with every matched song. If the library
+"Radio Archive" the same way. If the library
 already has another playlist named "Radio" or "Radio Archive", rename that
 one, or the dashboard reports that Music.app can't tell which playlist is
 Radio's.
