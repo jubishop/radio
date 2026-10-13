@@ -13,7 +13,7 @@ import Testing
         #expect(harness.music.playlists().isEmpty)
     }
 
-    @Test func firstSyncCreatesAPlaylistNamedAfterTheStationInFirstHeardOrder() async throws {
+    @Test func firstSyncCreatesAPlaylistNamedAfterTheStationInOrderOfLatestPlay() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
@@ -27,7 +27,7 @@ import Testing
         let report = try await harness.radio.sync()
 
         #expect(report.added == ["Alt 102.1": 2])
-        #expect(harness.music.playlists() == ["Alt 102.1": ["My Hero", "Africa"]])
+        #expect(harness.music.playlists() == ["Alt 102.1": ["Africa", "My Hero"]])
     }
 
     @Test func laterSyncsAppendOnlyNewSongs() async throws {
@@ -40,11 +40,11 @@ import Testing
         _ = try await harness.radio.run()
 
         harness.clock.advance(hours: 1)
-        harness.play("Bush", "Glycerine")
+        harness.play("Bush", "Glycerine", minutesAgo: 2)
         harness.play("Weezer", "Africa")
         _ = try await harness.radio.run()
 
-        #expect(harness.music.playlists() == ["Alt 102.1": ["Africa", "Glycerine"]])
+        #expect(harness.music.playlists() == ["Alt 102.1": ["Glycerine", "Africa"]])
     }
 
     @Test func eachStationGetsItsOwnPlaylistAndSharedSongsAreSearchedOnce() async throws {

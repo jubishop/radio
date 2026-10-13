@@ -92,6 +92,8 @@ final class FakeAppleMusic: Sendable {
     private let catalog = Mutex<[CatalogSong]>([])
     private let library = Mutex<(playlists: [String: Playlist], order: [String])>(([:], []))
     private let userStatus = Mutex(200)
+    /// Catalog songs whose entries haven't synced to Music.app yet.
+    private let unsynced = Mutex<Set<String>>([])
 
     init(http: FakeHTTP) {
         http.on("GET https://api.music.apple.com/v1/catalog/us/search") { [self] request in
@@ -108,6 +110,11 @@ final class FakeAppleMusic: Sendable {
             let id = request.url.lastPathComponent
             guard let song = catalog.withLock({ $0.first { $0.id == id } }) else { return json(["data": []], status: 404) }
             return json(["data": [Self.resource(song)]])
+        }
+        http.on("GET https://api.music.apple.com/v1/catalog/us/songs?") { [self] request in
+            let ids = Set((URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "ids" }?.value ?? "").split(separator: ",").map(String.init))
+            return json(["data": catalog.withLock { $0 }.filter { ids.contains($0.id) }.map(Self.resource)])
         }
         http.on("GET https://api.music.apple.com/v1/me/storefront") { [self] _ in
             let status = userStatus.withLock { $0 }
@@ -164,6 +171,66 @@ final class FakeAppleMusic: Sendable {
         library.withLock { library in library.order.compactMap { library.playlists[$0]?.name } }
     }
 
+    /// Adds a playlist directly, as if an earlier version of Radio created it.
+    func seedPlaylist(name: String, songIDs: [String]) -> String {
+        library.withLock { library in
+            let id = "p.\(library.order.count + 1)"
+            library.playlists[id] = Playlist(name: name, songIDs: songIDs)
+            library.order.append(id)
+            return id
+        }
+    }
+
+    func setSyncedToMusicApp(_ title: String, _ isSynced: Bool) {
+        let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
+        unsynced.withLock { if isSynced { $0.subtract(ids) } else { $0.formUnion(ids) } }
+    }
+
+    /// Removes a song from a playlist the way a person would in Music.
+    func removeByHand(_ title: String, from name: String) {
+        let ids = Set(catalog.withLock { $0 }.filter { $0.name == title }.map(\.id))
+        library.withLock { library in
+            for (id, playlist) in library.playlists where playlist.name == name {
+                library.playlists[id]!.songIDs.removeAll(where: ids.contains)
+            }
+        }
+    }
+
+    func renamePlaylist(_ name: String, to newName: String) {
+        library.withLock { library in
+            for (id, playlist) in library.playlists where playlist.name == name {
+                library.playlists[id]!.name = newName
+            }
+        }
+    }
+
+    /// Music.app's view of the same library: its own persistent IDs, and
+    /// entries found by the catalog song's title and artist.
+    func musicAppPerform(_ action: MusicAppAction, playlistID: String?, playlistName: String,
+                         songName: String, songArtist: String) -> MusicAppResult {
+        let songs = catalog.withLock { $0 }
+        return library.withLock { library in
+            let found = library.playlists.filter { id, playlist in
+                playlistID.map { "M-\(id)" == $0 } ?? (playlist.name == playlistName)
+            }
+            guard found.count == 1, let (id, playlist) = found.first else {
+                return found.isEmpty ? .playlistNotFound : .ambiguousPlaylist
+            }
+            let musicID = "M-\(id)"
+            let matching = Set(songs.filter {
+                $0.name.lowercased() == songName.lowercased() && $0.artistName.lowercased() == songArtist.lowercased()
+            }.map(\.id))
+            let hidden = unsynced.withLock { $0 }
+            guard let entry = playlist.songIDs.first(where: { matching.contains($0) && !hidden.contains($0) }) else {
+                return .trackNotFound(playlistID: musicID)
+            }
+            library.playlists[id]!.songIDs.removeAll { $0 == entry }
+            if action == .remove { return .removed(playlistID: musicID) }
+            library.playlists[id]!.songIDs.append(entry)
+            return .moved(playlistID: musicID)
+        }
+    }
+
     func deleteAllPlaylists() {
         library.withLock { $0.playlists = [:] }
     }
@@ -180,12 +247,38 @@ final class FakeAppleMusic: Sendable {
     }
 }
 
+/// Music.app on the Mac, editing the fake library.
+final class FakeMusicApp: MusicApp {
+    let music: FakeAppleMusic
+    private let state = Mutex<(failure: String?, calls: Int)>((nil, 0))
+
+    init(music: FakeAppleMusic) {
+        self.music = music
+    }
+
+    var calls: Int { state.withLock { $0.calls } }
+
+    func fail(with message: String?) {
+        state.withLock { $0.failure = message }
+    }
+
+    func perform(_ action: MusicAppAction, playlistID: String?, playlistName: String,
+                 songName: String, songArtist: String) async throws -> MusicAppResult {
+        if let failure = state.withLock({ state -> String? in state.calls += 1; return state.failure }) {
+            throw RadioError(failure)
+        }
+        return music.musicAppPerform(action, playlistID: playlistID, playlistName: playlistName,
+                                     songName: songName, songArtist: songArtist)
+    }
+}
+
 /// Everything a Radio needs, wired to fakes and a temporary directory.
 struct Harness {
     let http: FakeHTTP
     let clock = TestClock()
     let audacy: FakeAudacy
     let music: FakeAppleMusic
+    let musicApp: FakeMusicApp
     let home: RadioHome
     let radio: Radio
 
@@ -193,6 +286,7 @@ struct Harness {
         self.http = http
         audacy = FakeAudacy(http: http)
         music = FakeAppleMusic(http: http)
+        musicApp = FakeMusicApp(music: music)
         http.on("POST https://api.pushover.net/") { _ in json(["status": 1]) }
         home = RadioHome(directory: FileManager.default.temporaryDirectory
             .appendingPathComponent("radio-tests-\(UUID().uuidString)"))
@@ -202,6 +296,7 @@ struct Harness {
             http: http,
             sources: [AudacySource(http: http)],
             notifier: PushoverNotifier(http: http, userKey: pushover ? "user" : nil, apiKey: pushover ? "app" : nil),
+            musicApp: musicApp,
             now: { clock.now }
         )
     }

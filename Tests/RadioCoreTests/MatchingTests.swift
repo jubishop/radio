@@ -54,6 +54,19 @@ import Testing
         #expect(chooseMatch(artist: "Nirvana", title: "Come As You Are", candidates: candidates) == nil)
     }
 
+    /// Seen 2026-10-13: four songs matched crossfaded "(Mixed)" tracks from
+    /// "(DJ Mix)" compilation albums.
+    @Test func djMixVersionsAreRejected() {
+        let candidates = [
+            song("Florence + the Machine", "Dog Days Are Over (Mixed)", album: "Festival Mix 2022 (DJ Mix)", id: "mixed"),
+            song("Nine Inch Nails", "The Hand That Feeds", album: "YOU PRIDE ME OPEN (DJ Mix)", id: "dj"),
+        ]
+        #expect(chooseMatch(artist: "Florence + The Machine", title: "Dog Days Are Over", candidates: candidates) == nil)
+        #expect(chooseMatch(artist: "Nine Inch Nails", title: "The Hand That Feeds", candidates: candidates) == nil)
+        let studio = song("Florence + the Machine", "Dog Days Are Over", album: "Lungs", id: "studio")
+        #expect(chooseMatch(artist: "Florence + The Machine", title: "Dog Days Are Over", candidates: candidates + [studio])?.id == "studio")
+    }
+
     @Test func aLiveVersionMatchesWhenTheStationPlayedOne() {
         let match = chooseMatch(artist: "Pearl Jam", title: "Last Kiss (Live)",
                                 candidates: [song("Pearl Jam", "Last Kiss (Live)", id: "live")])

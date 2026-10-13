@@ -7,6 +7,8 @@ public struct Station: Equatable, Sendable {
     public var feedID: String
     public var name: String
     public var playlistID: String?
+    /// Music.app's persistent ID for the same playlist.
+    public var musicPlaylistID: String?
     public var lastPollOKAt: Date?
     public var pollFailingSince: Date?
     public var lastPollError: String?
@@ -24,8 +26,29 @@ public struct Song: Equatable, Sendable {
     public var status: SongStatus
     public var catalogID: String?
     public var catalogURL: String?
+    public var catalogName: String?
+    public var catalogArtist: String?
+    public var catalogAlbum: String?
+    public var matchedBy: String?
     public var candidates: [CatalogSong]
     public var heldAt: Date?
+}
+
+/// A matched song not yet in a station's playlist.
+struct TrackToAdd {
+    var songID: Int64
+    var catalogID: String
+    var latestPlay: String
+}
+
+/// A playlist entry whose song has played since the entry was placed.
+struct TrackToMove {
+    var songID: Int64
+    var catalogID: String
+    var catalogName: String?
+    var catalogArtist: String?
+    var addedAt: Date
+    var latestPlay: String
 }
 
 /// A play as the dashboard shows it, with where its song stands.
@@ -67,7 +90,11 @@ final class Store {
 
     private func migrate() throws {
         let version = try db.query("PRAGMA user_version").first?.int("user_version") ?? 0
-        guard version < 1 else { return }
+        if version < 1 { try createSchemaOne() }
+        if version < 2 { try migrateToSchemaTwo() }
+    }
+
+    private func createSchemaOne() throws {
         try db.transaction {
             try db.execute("""
                 CREATE TABLE stations (
@@ -128,6 +155,26 @@ final class Store {
         }
     }
 
+    /// Adds what moving and replacing playlist entries needs: catalog titles
+    /// to find entries in Music.app, Music.app's playlist IDs, and the play
+    /// each entry's position reflects. Existing entries were placed at their
+    /// song's first play.
+    private func migrateToSchemaTwo() throws {
+        try db.transaction {
+            try db.execute("ALTER TABLE songs ADD COLUMN catalog_name TEXT")
+            try db.execute("ALTER TABLE songs ADD COLUMN catalog_artist TEXT")
+            try db.execute("ALTER TABLE songs ADD COLUMN catalog_album TEXT")
+            try db.execute("ALTER TABLE stations ADD COLUMN music_playlist_id TEXT")
+            try db.execute("ALTER TABLE playlist_tracks ADD COLUMN position_played_at TEXT")
+            try db.execute("""
+                UPDATE playlist_tracks SET position_played_at = (
+                    SELECT MIN(p.played_at) FROM plays p
+                    WHERE p.station_id = playlist_tracks.station_id AND p.song_id = playlist_tracks.song_id)
+                """)
+            try db.execute("PRAGMA user_version = 2")
+        }
+    }
+
     // MARK: Stations
 
     func insertStation(_ info: StationInfo, at date: Date) throws -> Station {
@@ -140,6 +187,10 @@ final class Store {
 
     func stations() throws -> [Station] {
         try db.query("SELECT * FROM stations ORDER BY id").map(station(from:))
+    }
+
+    func station(id: Int64) throws -> Station? {
+        try db.query("SELECT * FROM stations WHERE id = ?", [.integer(id)]).first.map(station(from:))
     }
 
     func station(slug: String) throws -> Station? {
@@ -180,6 +231,13 @@ final class Store {
         }
     }
 
+    func setMusicPlaylist(stationID: Int64, musicPlaylistID: String?) throws {
+        try db.execute(
+            "UPDATE stations SET music_playlist_id = ? WHERE id = ?",
+            [musicPlaylistID.map(SQLValue.text) ?? .null, .integer(stationID)]
+        )
+    }
+
     private func station(from row: Row) -> Station {
         Station(
             id: row.int("id")!,
@@ -188,6 +246,7 @@ final class Store {
             feedID: row.string("feed_id")!,
             name: row.string("name")!,
             playlistID: row.string("playlist_id"),
+            musicPlaylistID: row.string("music_playlist_id"),
             lastPollOKAt: row.string("last_poll_ok_at").flatMap(parseISODate),
             pollFailingSince: row.string("poll_failing_since").flatMap(parseISODate),
             lastPollError: row.string("last_poll_error"),
@@ -275,10 +334,39 @@ final class Store {
     func markMatched(songID: Int64, catalog: CatalogSong, by method: String, at date: Date) throws {
         try db.execute(
             """
-            UPDATE songs SET status = 'matched', catalog_id = ?, catalog_url = ?, matched_by = ?, resolved_at = ?
+            UPDATE songs SET status = 'matched', catalog_id = ?, catalog_url = ?, catalog_name = ?,
+                catalog_artist = ?, catalog_album = ?, matched_by = ?, resolved_at = ?
             WHERE id = ?
             """,
-            [.text(catalog.id), .text(catalog.url), .text(method), .text(iso(date)), .integer(songID)]
+            [.text(catalog.id), .text(catalog.url), .text(catalog.name), .text(catalog.artistName),
+             .text(catalog.albumName), .text(method), .text(iso(date)), .integer(songID)]
+        )
+    }
+
+    func setCatalogDetails(_ catalog: CatalogSong) throws {
+        try db.execute(
+            "UPDATE songs SET catalog_name = ?, catalog_artist = ?, catalog_album = ? WHERE catalog_id = ?",
+            [.text(catalog.name), .text(catalog.artistName), .text(catalog.albumName), .text(catalog.id)]
+        )
+    }
+
+    /// Catalog IDs of matched songs saved before schema 2 recorded titles.
+    func catalogIDsMissingDetails() throws -> [String] {
+        try db.query("SELECT DISTINCT catalog_id FROM songs WHERE status = 'matched' AND catalog_name IS NULL")
+            .compactMap { $0.string("catalog_id") }
+    }
+
+    /// Puts every automatic match to a catalog song back to be matched again,
+    /// once its playlist entries are removed.
+    func resetAutoMatches(catalogID: String) throws {
+        try db.execute(
+            """
+            UPDATE songs SET status = 'pending', catalog_id = NULL, catalog_url = NULL, catalog_name = NULL,
+                catalog_artist = NULL, catalog_album = NULL, matched_by = NULL, candidates = NULL,
+                held_at = NULL, resolved_at = NULL
+            WHERE catalog_id = ? AND matched_by = 'auto'
+            """,
+            [.text(catalogID)]
         )
     }
 
@@ -338,6 +426,10 @@ final class Store {
             status: SongStatus(rawValue: row.string("status")!) ?? .pending,
             catalogID: row.string("catalog_id"),
             catalogURL: row.string("catalog_url"),
+            catalogName: row.string("catalog_name"),
+            catalogArtist: row.string("catalog_artist"),
+            catalogAlbum: row.string("catalog_album"),
+            matchedBy: row.string("matched_by"),
             candidates: candidates,
             heldAt: row.string("held_at").flatMap(parseISODate)
         )
@@ -346,30 +438,76 @@ final class Store {
     // MARK: Playlists
 
     /// Matched songs a station has played that aren't in its playlist yet,
-    /// in the order the station first played them.
-    func songsToAdd(stationID: Int64) throws -> [(songID: Int64, catalogID: String)] {
+    /// in the order of their latest plays.
+    func songsToAdd(stationID: Int64) throws -> [TrackToAdd] {
         try db.query(
             """
-            SELECT s.id, s.catalog_id, MIN(p.played_at) AS first_played
+            SELECT s.id, s.catalog_id, MAX(p.played_at) AS latest_played
             FROM plays p JOIN songs s ON s.id = p.song_id
             WHERE p.station_id = ? AND s.status = 'matched'
                 AND NOT EXISTS (SELECT 1 FROM playlist_tracks t
                                 WHERE t.station_id = p.station_id AND t.catalog_id = s.catalog_id)
-            GROUP BY s.catalog_id ORDER BY first_played, s.id
+            GROUP BY s.catalog_id ORDER BY latest_played, s.id
             """,
             [.integer(stationID)]
-        ).map { ($0.int("id")!, $0.string("catalog_id")!) }
+        ).map { TrackToAdd(songID: $0.int("id")!, catalogID: $0.string("catalog_id")!, latestPlay: $0.string("latest_played")!) }
     }
 
-    func recordAdded(stationID: Int64, tracks: [(songID: Int64, catalogID: String)], at date: Date) throws {
+    func recordAdded(stationID: Int64, tracks: [TrackToAdd], at date: Date) throws {
         try db.transaction {
             for track in tracks {
                 try db.execute(
-                    "INSERT OR IGNORE INTO playlist_tracks (station_id, catalog_id, song_id, added_at) VALUES (?, ?, ?, ?)",
-                    [.integer(stationID), .text(track.catalogID), .integer(track.songID), .text(iso(date))]
+                    """
+                    INSERT OR IGNORE INTO playlist_tracks (station_id, catalog_id, song_id, added_at, position_played_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [.integer(stationID), .text(track.catalogID), .integer(track.songID), .text(iso(date)), .text(track.latestPlay)]
                 )
             }
         }
+    }
+
+    /// Entries whose song has played again since the entry was placed, in the
+    /// order of those plays.
+    func tracksToMove(stationID: Int64) throws -> [TrackToMove] {
+        try db.query(
+            """
+            SELECT t.song_id, t.catalog_id, t.added_at, s.catalog_name, s.catalog_artist,
+                MAX(p.played_at) AS latest_played
+            FROM playlist_tracks t
+            JOIN songs s ON s.catalog_id = t.catalog_id AND s.status = 'matched'
+            JOIN plays p ON p.song_id = s.id AND p.station_id = t.station_id
+            WHERE t.station_id = ?
+            GROUP BY t.catalog_id
+            HAVING latest_played > COALESCE(t.position_played_at, '')
+            ORDER BY latest_played
+            """,
+            [.integer(stationID)]
+        ).map {
+            TrackToMove(songID: $0.int("song_id")!, catalogID: $0.string("catalog_id")!,
+                        catalogName: $0.string("catalog_name"), catalogArtist: $0.string("catalog_artist"),
+                        addedAt: parseISODate($0.string("added_at")!)!, latestPlay: $0.string("latest_played")!)
+        }
+    }
+
+    func setPosition(stationID: Int64, catalogID: String, playedAt: String) throws {
+        try db.execute(
+            "UPDATE playlist_tracks SET position_played_at = ? WHERE station_id = ? AND catalog_id = ?",
+            [.text(playedAt), .integer(stationID), .text(catalogID)]
+        )
+    }
+
+    /// Entries for a catalog song, across every station's playlist.
+    func entries(catalogID: String) throws -> [(stationID: Int64, addedAt: Date)] {
+        try db.query("SELECT station_id, added_at FROM playlist_tracks WHERE catalog_id = ?", [.text(catalogID)])
+            .map { ($0.int("station_id")!, parseISODate($0.string("added_at")!)!) }
+    }
+
+    func removePlaylistTrack(stationID: Int64, catalogID: String) throws {
+        try db.execute(
+            "DELETE FROM playlist_tracks WHERE station_id = ? AND catalog_id = ?",
+            [.integer(stationID), .text(catalogID)]
+        )
     }
 
     func playlistCount(stationID: Int64) throws -> Int {

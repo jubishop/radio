@@ -75,6 +75,18 @@ public struct AppleMusicClient: Sendable {
         return response.data.first?.catalogSong
     }
 
+    /// Looks up catalog songs by ID, up to 300 per request.
+    public func songs(ids: [String]) async throws -> [CatalogSong] {
+        var found: [CatalogSong] = []
+        for start in stride(from: 0, to: ids.count, by: 300) {
+            var components = URLComponents(string: "\(Self.base)/catalog/\(storefront)/songs")!
+            components.queryItems = [URLQueryItem(name: "ids", value: ids[start..<min(start + 300, ids.count)].joined(separator: ","))]
+            let response: Resources = try await request("GET", components.url!)
+            found += response.data.map(\.catalogSong)
+        }
+        return found
+    }
+
     public func userStorefront() async throws -> String {
         let response: Resources = try await request("GET", URL(string: "\(Self.base)/me/storefront")!)
         guard let id = response.data.first?.id else {

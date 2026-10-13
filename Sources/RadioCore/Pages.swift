@@ -14,6 +14,9 @@ enum Pages {
         if let error = status.lastSyncError {
             body += "<p class=\"problem\">Last sync failed: \(escape(error))</p>"
         }
+        if let error = status.musicAppError {
+            body += "<p class=\"problem\">Music.app can't move re-played songs: \(escape(error))</p>"
+        }
         body += "</header>"
         if status.stations.isEmpty {
             body += "<p class=\"empty\">No stations yet. Run <code>radio station add alt1021rva</code>.</p>"

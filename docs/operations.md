@@ -47,6 +47,16 @@ six months.
 The next scheduled run matches songs and creates each station's playlist,
 named after the station. Run `radio sync` to do it immediately.
 
+Playlists end with the most recently played song. Sort a playlist by
+**Playlist Order, descending** to see it newest first. A song that plays again
+moves to the end through Music.app, so Music.app on the Mac mini must stay
+signed in with **Sync Library** on. The first time the scheduled run uses it,
+approve "radio wants access to control Music". If you missed that prompt,
+allow it in System Settings > Privacy & Security > Automation. `bin/deploy`
+signs the binary with your Apple Development identity, so the approval lasts
+across updates. Until Music.app works, the dashboard shows why, new songs keep
+being added, and moves wait.
+
 When the sign-in expires, Radio sends one Pushover alert and the dashboard
 shows "sign-in expired". Repeat step 4.
 

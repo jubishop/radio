@@ -44,8 +44,10 @@ service by hand isn't enough.
 ### Add every unique song the first time it plays
 
 Accepted 2026-10-13. Every song the station plays goes into the playlist,
-added the first time it's heard, so the playlist is in first-heard order and
-only grows. The user accepted the recommendation, whose reasons were that it
+added the first time it's heard, so the playlist only grows. Its order was
+first-heard order until a
+[later decision](#move-a-re-played-song-to-the-end-of-the-playlist) the same
+day ordered it by most recent play. The user accepted the recommendation, whose reasons were that it
 matches the goal of logging every song and that the public Apple Music API
 seems to support only adding tracks to library playlists. Apple said in its
 developer forums that it couldn't offer removal, and developers report that
@@ -53,6 +55,37 @@ DELETE and PUT now return 403. No official Apple documentation was found that
 supports removing tracks (searched 2026-10-13). The tradeoff is that one-off
 songs from specialty shows, such as the Sunday "Underexposed" local-music
 show, are included.
+
+### Move a re-played song to the end of the playlist
+
+Accepted 2026-10-13. This replaces the first-heard order in the decision
+above. When a song already in a station's playlist plays again, Radio moves
+its entry to the end. Each playlist is therefore ordered by most recent play,
+and sorting it in reverse (newest first) shows re-played songs at the top. The
+user asked for re-played songs to return to the top and chose the recommended
+approach.
+
+No Apple interface Radio can use reorders a playlist:
+
+- The web API only adds tracks.
+- The macOS 27 SDK marks every MusicKit library write (`createPlaylist`,
+  `add`, `edit`) as `@available(macOS, unavailable)`, checked 2026-10-13.
+- Music.app's scripting `move` command applies only to playlists.
+
+Radio therefore moves the song through Music.app on the Mac mini: it copies
+the entry to the end of the same playlist, then deletes the original. New
+songs are still added through the web API. Costs:
+
+- Music.app on the Mac mini must stay signed in with Sync Library on.
+- The user approves "radio wants to control Music" once.
+- `bin/deploy` signs the binary with the user's Apple Development identity,
+  so that approval survives updates.
+- If Music.app can't move a song, it stays where it is, and the move is
+  retried on the song's next play.
+
+The rejected alternatives were rebuilding the playlist newest-first on every
+sync, which rewrites the whole playlist and risks iCloud sync conflicts, and
+keeping first-heard order.
 
 ### Sync through the Apple Music REST API from a headless CLI
 
@@ -246,6 +279,19 @@ explicitly approved them.
 - **Song identity:** a song is its normalized primary artist plus its title
   without parenthetical suffixes. Each station's playlist holds an Apple
   Music catalog ID at most once.
+- **Moves in practice:** adds and moves run in play order within each sync.
+  Music.app finds a playlist by name until it learns the playlist's
+  persistent ID, and finds an entry by its catalog title and artist. It
+  deletes every entry for that library track and adds the track back.
+  An entry Music.app can't find is retried for an hour, since a song added
+  through the web API takes time to sync to the Mac. After that, Radio treats
+  the entry as removed by hand and adds the song again on its next play.
+- **Rule changes apply to old matches:** each sync rechecks automatic matches
+  against the current rules. Any the rules now reject are removed through
+  Music.app and matched again. On 2026-10-13 the first release was found to
+  have accepted four DJ-mix versions ("(Mixed)" titles from "(DJ Mix)"
+  albums). The updated matcher rejects these, so they're replaced once
+  Music.app access is approved.
 - **Apple sign-in:** the dashboard's `/auth` page runs MusicKit JS and
   accepts only loopback requests, so it's opened at `http://localhost:8102/auth`
   on the Mac mini. That page receives a developer token, which shouldn't

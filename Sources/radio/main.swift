@@ -52,7 +52,8 @@ func makeRadio() throws -> Radio {
         home: .standard(),
         http: http,
         sources: [AudacySource(http: http)],
-        notifier: PushoverNotifier(http: http, envFile: envFile)
+        notifier: PushoverNotifier(http: http, envFile: envFile),
+        musicApp: ScriptedMusicApp()
     )
 }
 
@@ -72,7 +73,11 @@ func printSync(_ report: SyncReport) {
         return
     }
     let added = report.added.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value)" }.joined(separator: ", ")
-    log("Sync: \(report.matched) matched, \(report.held) held for review\(added.isEmpty ? "" : "; added \(added)")")
+    let moved = report.moved.filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+    log("Sync: \(report.matched) matched, \(report.held) held for review"
+        + (added.isEmpty ? "" : "; added \(added)")
+        + (moved.isEmpty ? "" : "; moved to end \(moved)")
+        + (report.replaced == 0 ? "" : "; replaced \(report.replaced) rejected matches"))
     if let error = report.error { log("Sync failed: \(error)") }
 }
 
@@ -181,6 +186,7 @@ func main(_ arguments: [String]) async throws -> Int32 {
         }
         print("Last sync: \(status.lastSyncAt.map(displayTime) ?? "never")\(status.lastSyncError.map { " (failed: \($0))" } ?? "")")
         print("Songs to review: \(status.heldCount)")
+        if let error = status.musicAppError { print("Music.app: \(error)") }
         for summary in status.stations {
             let station = summary.station
             let feed = station.pollFailingSince.map { "failing since \(displayTime($0)): \(station.lastPollError ?? "")" }

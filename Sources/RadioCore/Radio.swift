@@ -17,6 +17,10 @@ public struct SyncReport: Sendable {
     public var matched = 0
     public var held = 0
     public var added: [String: Int] = [:]
+    public var moved: [String: Int] = [:]
+    /// Songs whose earlier automatic match the current rules reject, removed
+    /// from playlists to be matched again.
+    public var replaced = 0
     public var error: String?
 }
 
@@ -41,6 +45,8 @@ public struct RadioStatus: Sendable {
     public var appleMusic: AppleMusicState
     public var lastSyncAt: Date?
     public var lastSyncError: String?
+    /// Why Music.app couldn't move or remove a playlist entry, until it can.
+    public var musicAppError: String?
     public var heldCount: Int
 }
 
@@ -60,6 +66,7 @@ public actor Radio {
     let http: HTTPClient
     let sources: [String: PlaySource]
     let notifier: PushoverNotifier
+    let musicApp: MusicApp?
     let now: @Sendable () -> Date
     public nonisolated let dashboardURL: String
     public nonisolated let signInURL: String
@@ -77,6 +84,7 @@ public actor Radio {
         http: HTTPClient,
         sources: [PlaySource],
         notifier: PushoverNotifier,
+        musicApp: MusicApp? = nil,
         dashboardURL: String = "http://jubi.local:8102",
         signInURL: String = "http://localhost:8102/auth",
         now: @escaping @Sendable () -> Date = Date.init
@@ -88,6 +96,7 @@ public actor Radio {
         self.http = http
         self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.name, $0) })
         self.notifier = notifier
+        self.musicApp = musicApp
         self.dashboardURL = dashboardURL
         self.signInURL = signInURL
         self.now = now
@@ -198,7 +207,8 @@ public actor Radio {
 
     // MARK: Syncing
 
-    /// Matches new songs and adds them to each station's playlist.
+    /// Matches new songs, adds them to each station's playlist, and moves
+    /// re-played songs to the end. See PlaylistSync.swift.
     public func sync() async throws -> SyncReport {
         var report = SyncReport()
         guard let client = try client(requireUser: true) else {
@@ -213,7 +223,10 @@ public actor Radio {
         }
         defer { lock.release() }
         defer { try? store.setMetaDate("sync.last_at", now()) }
+        var music = MusicAppSession()
         do {
+            try await fillCatalogDetails(client: client)
+            report.replaced = try await replaceRejectedMatches(music: &music)
             for song in try store.songs(status: .pending) {
                 let results = try await client.searchSongs(SongIdentity.searchTerm(artist: song.artist, title: song.title))
                 if let match = chooseMatch(artist: song.artist, title: song.title, candidates: results) {
@@ -225,7 +238,9 @@ public actor Radio {
                 }
             }
             for station in try store.stations() {
-                report.added[station.name] = try await syncPlaylist(for: station, client: client)
+                let result = try await syncPlaylist(for: station, client: client, music: &music)
+                report.added[station.name] = result.added
+                report.moved[station.name] = result.moved
             }
             try store.setMetaDate("auth.rejected_at", nil)
             try store.setMetaDate("auth.alert_sent_at", nil)
@@ -238,39 +253,8 @@ public actor Radio {
             try store.setMeta("sync.last_error", String(describing: error))
             report.error = String(describing: error)
         }
+        try finish(music)
         return report
-    }
-
-    private func syncPlaylist(for station: Station, client: AppleMusicClient) async throws -> Int {
-        var pending = try store.songsToAdd(stationID: station.id)
-        guard !pending.isEmpty else { return 0 }
-        var playlistID = station.playlistID
-        var added = 0
-        while !pending.isEmpty {
-            let batch = Array(pending.prefix(AppleMusicClient.batchSize))
-            if let existing = playlistID {
-                do {
-                    try await client.addSongs(batch.map(\.catalogID), toPlaylist: existing)
-                } catch let error as HTTPStatusError where error.status == 404 {
-                    // The playlist was deleted in Music. Start a new one with
-                    // every song on the next sync.
-                    try store.setPlaylist(stationID: station.id, playlistID: nil)
-                    return added
-                }
-            } else {
-                let created = try await client.createPlaylist(
-                    name: station.name,
-                    description: "Every song \(station.name) has played, collected by Radio.",
-                    songIDs: batch.map(\.catalogID)
-                )
-                try store.setPlaylist(stationID: station.id, playlistID: created)
-                playlistID = created
-            }
-            try store.recordAdded(stationID: station.id, tracks: batch, at: now())
-            added += batch.count
-            pending.removeFirst(batch.count)
-        }
-        return added
     }
 
     // MARK: Scheduled runs
@@ -391,6 +375,7 @@ public actor Radio {
             appleMusic: try appleMusicState(),
             lastSyncAt: try store.metaDate("sync.last_at"),
             lastSyncError: try store.meta("sync.last_error"),
+            musicAppError: try store.meta("music.last_error"),
             heldCount: try store.heldCount(since: nil)
         )
     }

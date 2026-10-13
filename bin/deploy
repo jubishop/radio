@@ -12,6 +12,14 @@ swift build --package-path "$root" -c release
 built="$(swift build --package-path "$root" -c release --show-bin-path)/radio"
 mkdir -p "$bin_dir" "$log_dir" "$agents"
 /usr/bin/install -m 0755 "$built" "$bin_dir/radio.new"
+# macOS ties Radio's permission to control Music to its code signature, so
+# sign with a stable identity or it asks again after every deploy.
+identity=${RADIO_SIGNING_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n 1)}
+if [ -n "$identity" ]; then
+  codesign --force --sign "$identity" --identifier com.jubishop.radio "$bin_dir/radio.new"
+else
+  echo "No Apple Development signing identity found; macOS may ask again to let Radio control Music." >&2
+fi
 mv -f "$bin_dir/radio.new" "$bin_dir/radio"
 
 # write_agent LABEL SCHEDULE_XML ARGUMENT...

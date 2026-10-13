@@ -80,9 +80,9 @@ enum SongIdentity {
 
     /// Words that mark an alternate recording in a title or album.
     private static let versionPattern =
-        #"[\(\[\-]\s*[^\)\]]*\b(live|acoustic|remix|mix|karaoke|instrumental|demo|unplugged|sped up|slowed|a cappella)\b"#
+        #"[\(\[\-]\s*[^\)\]]*\b(live|acoustic|remix|mix|mixed|karaoke|instrumental|demo|unplugged|sped up|slowed|a cappella)\b"#
     private static let liveAlbumPattern =
-        #"(\(live\)|\blive (at|from|in|on)\b|\bunplugged\b|\bkaraoke\b|\btribute\b)"#
+        #"(\(live\)|\blive (at|from|in|on)\b|\bunplugged\b|\bkaraoke\b|\btribute\b|\bdj mix\b|\bmixed by\b|\bcontinuous mix\b)"#
 
     static func isAlternateVersion(title: String) -> Bool {
         title.range(of: versionPattern, options: [.regularExpression, .caseInsensitive]) != nil
