@@ -80,8 +80,9 @@ songs are still added through the web API. Costs:
 - The user approves "radio wants to control Music" once.
 - `bin/deploy` signs the binary with the user's Apple Development identity,
   so that approval survives updates.
-- If Music.app can't move a song, it stays where it is, and the move is
-  retried on the song's next play.
+- If Music.app can't move a song, it stays where it is. The move stays
+  pending and is retried on each later sync until Music.app succeeds. A song
+  that Music.app reports as not in the library isn't retried.
 
 The rejected alternatives were rebuilding the playlist newest-first on every
 sync, which rewrites the whole playlist and risks iCloud sync conflicts, and
@@ -296,6 +297,17 @@ explicitly approved them.
   accepts only loopback requests, so it's opened at `http://localhost:8102/auth`
   on the Mac mini. That page receives a developer token, which shouldn't
   travel over the home network.
+- **One sync at a time:** a sync takes an exclusive lock on `sync.lock` in the
+  data directory, and a sync that finds it held skips with "Another sync is
+  running." The lock was added on 2026-10-13, after overlapping syncs had
+  duplicated playlists, and the API can't delete a playlist.
+- **Alternate versions:** a catalog candidate is rejected when its title or
+  album marks an alternate version, unless the played title does too, and a
+  song with no accepted candidate is held for review. Title marks are live,
+  acoustic, remix, mix, mixed, karaoke, instrumental, demo, unplugged, sped
+  up, slowed, and a cappella, in parentheses, brackets, or after a dash.
+  Album marks add "DJ Mix", "Mixed by", "Continuous Mix", tribute, and
+  live-album phrases such as "(Live)".
 
 ## Open questions
 
