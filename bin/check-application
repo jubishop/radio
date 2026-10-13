@@ -1,0 +1,22 @@
+#!/bin/sh
+# Run Radio's Swift build and tests; bin/check --full calls this after the foundation checks.
+set -eu
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+
+minimum=6.2
+if [ "$(uname -s)" != Darwin ]; then
+  echo "Radio's application checks need macOS (CryptoKit, Network, SQLite3)." >&2
+  exit 1
+fi
+if ! version=$(swift --version 2>/dev/null | sed -n 's/.*Swift version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1) || [ -z "$version" ]; then
+  echo "Swift $minimum or later is required. Install the latest Xcode or Command Line Tools." >&2
+  exit 1
+fi
+if [ "$(printf '%s\n%s\n' "$minimum" "$version" | sort -t. -k1,1n -k2,2n | head -n 1)" != "$minimum" ]; then
+  echo "Found Swift $version; Radio needs Swift $minimum or later. Update Xcode or select a newer toolchain with xcode-select." >&2
+  exit 1
+fi
+
+swift build --package-path "$root" --build-tests
+swift test --package-path "$root" --skip-build

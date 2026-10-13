@@ -11,3 +11,7 @@ __pycache__/
 worktrees/
 .todos/
 # project-starter:end
+
+# Swift build output
+.build/
+.swiftpm/

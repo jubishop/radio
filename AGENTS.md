@@ -33,9 +33,12 @@ Project Starter manages this block; add project rules after it.
 ## Project
 
 - Radio follows radio stations and builds Apple Music playlists from the songs
-  each station has played. No application exists yet, so there are no
-  application checks, setup steps, or runtime requirements to follow.
-- When an application is added, create `bin/check-application` and, when it
-  has dependencies, `bin/setup-application`, then record its commands and
-  runtime minimums in [development workflow](docs/development-workflow.md).
+  each station has played. It is a dependency-free Swift package (macOS 26+,
+  Swift 6.2+); `bin/check-application` builds and tests it, and CI cannot, so
+  run `bin/check --full` locally before merging. Commands, versions, and
+  deployment (`bin/deploy`) are in
+  [development workflow](docs/development-workflow.md).
+- Run the CLI from a checkout with `RADIO_HOME` set to a scratch directory and
+  `RADIO_ENV_FILE=/dev/null`, so it never touches the live database or sends
+  alerts.
 - The project is MIT licensed; keep `LICENSE` in the root.

@@ -3,9 +3,13 @@
 Radio follows radio stations and builds Apple Music playlists from the songs
 each station has played.
 
-The project has no application yet. Its design and decisions will go in
-[docs](docs/README.md) as they are made. This repository currently holds the
-project setup, knowledge pages, and task-tracking configuration.
+Radio is a Swift command-line tool that runs on a Mac. Every 15 minutes it
+logs each followed station's plays from the station's public now-playing feed.
+Each newly heard song goes into an Apple Music playlist named after the
+station. A dashboard on the home network shows recent activity and lists songs
+that need a manual match. The first station is Alt 102.1 (WRXL, Richmond).
+See [operations](docs/operations.md) to install and use it, and
+[Radio design](docs/design.md) for the decisions behind it.
 
 Licensed under the [MIT License](LICENSE).
 

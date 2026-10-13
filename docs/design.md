@@ -1,0 +1,256 @@
+---
+status: current
+---
+
+# Radio design
+
+Radio logs each song that Alt 102.1 (WRXL, Richmond) plays and turns the log
+into an Apple Music playlist. This page records the accepted decisions, the
+constraints they rest on, and the questions still open. Feed details are in
+[Audacy now-playing feed](audacy-now-playing-feed.md).
+
+## Constraints
+
+- **Runs on the user's Mac mini.** The user set this requirement on
+  2026-10-13. On that date, the machine's `pmset` sleep setting was `0` (it
+  never sleeps) and it had been up for 13 days.
+- **The feed keeps only the last 50 plays,** about four hours, and older plays
+  can't be fetched. If the logger stops for longer than that, those plays are
+  lost.
+
+## Decisions
+
+### Read the Audacy JSON feed, not the audio stream
+
+Accepted 2026-10-13. The user's plan said to use a JSON now-playing feed if one
+existed, and one does. It already has the artist, title, start time, and a
+play ID, so the logger doesn't need the stream URL, ICY metadata, HLS ID3
+tags, or AVFoundation.
+
+The user's plan ruled out a cloud scheduled task because hourly runs would
+miss songs. With a four-hour feed window, an hourly run would catch every
+play, so that reason no longer applies. The logger stays on the Mac mini
+because the user requires it.
+
+### Keep the playlist up to date
+
+Accepted 2026-10-13. The logger runs indefinitely, and a scheduled sync adds
+newly heard songs to the playlist. This replaces the plan's one-time playlist
+built after one or two weeks. The user accepted the recommendation, whose
+reason was that a poll every 15 minutes costs almost nothing. The tradeoff is
+that playlist creation must be automated, so pasting the list into a web
+service by hand isn't enough.
+
+### Add every unique song the first time it plays
+
+Accepted 2026-10-13. Every song the station plays goes into the playlist,
+added the first time it's heard, so the playlist is in first-heard order and
+only grows. The user accepted the recommendation, whose reasons were that it
+matches the goal of logging every song and that the public Apple Music API
+seems to support only adding tracks to library playlists. Apple said in its
+developer forums that it couldn't offer removal, and developers report that
+DELETE and PUT now return 403. No official Apple documentation was found that
+supports removing tracks (searched 2026-10-13). The tradeoff is that one-off
+songs from specialty shows, such as the Sunday "Underexposed" local-music
+show, are included.
+
+### Sync through the Apple Music REST API from a headless CLI
+
+Accepted 2026-10-13. A command that launchd runs uses the Apple Music REST API
+to search the catalog, create the library playlist, and add tracks. On each
+run it signs its own developer token with a MusicKit `.p8` key from the user's
+paid Apple Developer team, `34TKMKM889`. The membership was confirmed from
+App Store provisioning profiles on this Mac. A local browser page uses
+MusicKit JS for a one-time sign-in that gets the Music User Token. The user
+accepted the recommendation, whose reason was that a plain CLI is the
+simplest thing for launchd to run headless.
+
+The rejected alternative was a signed macOS app using the MusicKit framework,
+which has no user token to renew but needs an Xcode project, code signing,
+and a running app. The tradeoffs of the CLI:
+
+- The Music User Token reportedly expires after about six months, and then
+  the user must sign in again. The sync must fail clearly and notify the user
+  when that happens.
+- The user must create the MusicKit key in their developer account.
+- TuneMyMusic and Soundiiz are ruled out, because keeping the playlist up to
+  date needs automated syncs.
+
+### Write it as a Swift package with no dependencies
+
+Accepted 2026-10-13. The tool is a Swift package that builds one executable.
+It uses URLSession for HTTP and JSON, CryptoKit P256 to sign the ES256
+developer token, and Swift Testing for tests. The user accepted the
+recommendation, whose reasons were that Swift 6.4 is already installed, the
+user works in Swift, the platform frameworks cover everything with no
+third-party packages, and launchd can run a single compiled binary.
+
+Python and Ruby were rejected. Both would need either a dependency or a
+hand-written DER-to-raw signature conversion for the JWT, and launchd would
+have to depend on a user-managed interpreter.
+
+### Store plays and sync state in SQLite outside the repository
+
+Accepted 2026-10-13. The tool keeps its state in
+`~/Library/Application Support/Radio/radio.sqlite` and reads it through
+macOS's built-in SQLite3 C library. The database records each play, keyed by
+the feed's play ID, along with each song's Apple Music match and whether it
+has been added to the playlist. A `radio export` command writes the CSV the
+user's plan described. The user accepted the recommendation, whose reasons
+were that sync state needs safe updates and has no dependency cost, and that
+data outside the checkout survives clones and deleted worktrees. This replaces
+the plan's CSV-only log, so the data can't be opened directly in a
+spreadsheet without running the export.
+
+### Keep Apple credentials in owner-only files
+
+Accepted 2026-10-13. The MusicKit key (`AuthKey_<KEYID>.p8`) and a
+`credentials.json` file with the key ID, team ID, and Music User Token live in
+`~/Library/Application Support/Radio`, with mode `0600`. The tool refuses to
+use a credential file that other users can read. The user accepted the
+recommendation, whose reasons were that it works headless under launchd with
+no prompts and matches the user's plaintext `~/.env` setup for other API keys.
+The tradeoff is that the secrets aren't encrypted at rest.
+
+The macOS Keychain was rejected because access depends on the binary's code
+signature, and an approval dialog would block headless runs. 1Password was
+rejected because the user's Git workflow notes say to avoid 1Password prompts
+in automated work.
+
+### Send Pushover alerts for failures only
+
+Accepted 2026-10-13. The user authorized Radio to send Pushover alerts in two
+cases: when Apple Music rejects the Music User Token, and when the feed has
+failed for more than two hours. The second case matters because plays older
+than the feed's window of about four hours are lost. A problem sends at most
+one alert until it recovers. On 2026-10-13 the sign-in alert gained a one-hour
+delay, so it fires only when rejection persists. The reason: a newly created
+MusicKit key answered 401 intermittently for several minutes while Apple
+rolled it out, and one 401 had sent a false alert. Radio reads `PUSHOVER_USER_KEY` and
+`PUSHOVER_API_KEY` from `~/.env` at run time, so `~/.env` remains their only
+copy. Both names were present there, in an owner-only file, on 2026-10-13.
+The user accepted the recommendation, whose reason was that a lapsed token or
+a dead feed is otherwise invisible until the playlist stops growing. Radio
+sends no alerts for new songs.
+
+### Support many stations, each with its own playlist
+
+Accepted 2026-10-13. Radio polls Alt 102.1 (WRXL, Richmond) now, and the user
+asked for the design to allow more stations later. Each station's songs go
+into a separate playlist named after that station.
+
+- Stations are stored data, not code. `radio station add <audacy-slug>` reads
+  the station's Audacy page for its feed ID (`window.STATION_ROC_ID`) and its
+  name. Each run polls every station.
+- Each station has its own playlist, which Radio creates on first sync and
+  then tracks by its library playlist ID. WRXL's playlist is named
+  "Alt 102.1". Renaming it in Music won't break syncing.
+- Plays, playlist membership, and feed-failure alerts are tracked per station.
+  Apple Music matches are cached across stations, so a song that two stations
+  play is searched only once.
+- The Audacy feed reader sits behind a small source interface, so a station
+  from another network can get its own reader later. Only the Audacy reader is
+  built now.
+
+### Prefer explicit versions
+
+Accepted 2026-10-13. When Apple Music has both explicit and clean versions of
+a song, Radio adds the explicit one, and uses the clean one only when no
+explicit version exists. The user accepted the recommendation, whose reason
+was that the album version is usually the explicit one, even though the
+station plays clean edits.
+
+### Match strictly and hold back uncertain songs for review
+
+Accepted 2026-10-13. Radio adds a song automatically only when its normalized
+artist and title both match an Apple Music catalog song. Normalization ignores
+a leading "The", treats "&" and "and" alike, and handles featured artists and
+"A / B" credits. Live, Acoustic, Remix, and Karaoke versions are avoided unless
+the station played one. Any other song is held back for review on the
+[review page](#review-held-back-songs-on-a-home-network-web-page). The page
+lists each held-back song with its station, play count, last play time, and
+Apple Music's top three candidates with links. From the page you can pick a
+candidate, paste any Apple Music song link, or ignore the song for good. A
+choice is remembered for that song across every station.
+
+The user chose strict matching because the API can't remove a wrong track,
+so a bad match would stay in the playlist until it's deleted by hand in Music.
+
+### Review held-back songs on a home-network web page
+
+Accepted 2026-10-13. An always-running LaunchAgent serves the review page at
+`http://jubi.local:8102`, and any device on the home network can open it. The
+page has no login or secret token, because the user said the information
+isn't sensitive, so anyone on the home network can match or ignore songs. The
+user chose a web page over the recommended terminal-only review. Later the
+same day, the user asked to keep terminal commands as well: `radio unmatched`,
+`radio match`, and `radio ignore` do the same work as the page.
+
+The macOS application firewall was off on 2026-10-13, and port 8102 was free.
+
+### Make the page a home-network activity dashboard
+
+Accepted 2026-10-13. The user asked for a live site showing what has been
+happening, and chose the recommended home-network dashboard over a public
+site. The page at `http://jubi.local:8102` shows, for each station, the
+current and recent plays and the songs just added to its playlist. It also
+shows the review queue and health: last poll, last sync, and Apple Music
+sign-in status. The page refreshes itself. Public hosting was deferred
+because it would add a service to deploy, secure, and keep in sync.
+
+### Send a weekly Pushover nudge about held-back songs
+
+Accepted 2026-10-13. Once a week, Radio sends a Pushover message if songs were
+held back since the last nudge. It says how many and links to
+`http://jubi.local:8102`, and it sends nothing otherwise. This is in addition
+to the failure alerts. The link opens only on the home network, which the user
+accepted. The user accepted the recommendation, whose reason was that nobody
+would otherwise remember to check.
+
+### Run application checks locally, not in CI
+
+Accepted 2026-10-13. GitHub Actions keeps running only the document and
+foundation checks (`bin/check`) on Ubuntu. The Swift build and tests need
+macOS frameworks, so `bin/check --full` runs locally on the Mac before each
+merge, which the [check policy](foundation/engineering-policy.md#checks)
+allows when there's no enforced CI gate. The user chose this over the
+recommended macOS CI job, which would have cost 10× Actions minutes on this
+private repository. The tradeoff is that nothing enforces the application
+checks.
+
+## Proposed implementation defaults
+
+These are conventional choices proposed on 2026-10-13. The user hasn't
+explicitly approved them.
+
+- **Package layout:** a `RadioCore` library with the logic, a thin `radio`
+  executable, and Swift Testing tests. Fakes sit at the HTTP boundary, and
+  tests use a real SQLite database in a temporary directory.
+- **Commands:**
+  - `radio station add <audacy-slug>` and `radio station list`
+  - `radio poll` and `radio sync`
+  - `radio run`, which polls, syncs, and handles alerts and the weekly nudge
+  - `radio serve`
+  - `radio unmatched`, `radio match`, and `radio ignore`
+  - `radio credentials`
+  - `radio export`
+  - `radio status`
+- **Schedule:** the `run` LaunchAgent fires every 15 minutes, which leaves
+  most of the feed's four-hour window as slack. The `serve` LaunchAgent stays
+  running. Both use `launchctl bootstrap` in the `gui/<uid>` domain, and
+  `bin/deploy` builds a release binary into `~/.local/bin/radio` and loads
+  both agents. Logs go to `~/Library/Logs/Radio`.
+- **Data directory:** `RADIO_HOME` overrides
+  `~/Library/Application Support/Radio`, so development checkouts never touch
+  the live database.
+- **Song identity:** a song is its normalized primary artist plus its title
+  without parenthetical suffixes. Each station's playlist holds an Apple
+  Music catalog ID at most once.
+- **Apple sign-in:** the dashboard's `/auth` page runs MusicKit JS and
+  accepts only loopback requests, so it's opened at `http://localhost:8102/auth`
+  on the Mac mini. That page receives a developer token, which shouldn't
+  travel over the home network.
+
+## Open questions
+
+None remain from the design interview.

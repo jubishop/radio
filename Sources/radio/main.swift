@@ -1,0 +1,209 @@
+import Foundation
+import RadioCore
+
+let usage = """
+    Usage: radio <command>
+
+    Stations
+      station add <audacy-slug> [--name NAME]   Follow a station, e.g. alt1021rva
+      station list                              List followed stations
+
+    Scheduled work
+      run                     Poll, sync, and send alerts (launchd runs this)
+      poll                    Log new plays from every station
+      sync                    Match new songs and update playlists
+      serve [--port 8102]     Serve the dashboard (launchd keeps this running)
+
+    Review
+      unmatched               List songs held back for review
+      match <id><letter>      Use a listed candidate, e.g. `radio match 12a`
+      match <id> <link>       Use any Apple Music song link
+      ignore <id>             Never add this song
+
+    Setup and data
+      credentials set --key-id ID --team-id ID --key-file AuthKey.p8
+      credentials show        Show Apple Music setup, without secrets
+      status                  Show station and sync health
+      export [--station SLUG] Write every logged play as CSV
+
+    RADIO_HOME overrides ~/Library/Application Support/Radio.
+    """
+
+struct UsageError: Error, CustomStringConvertible {
+    let description: String
+}
+
+func option(_ name: String, in arguments: [String]) throws -> String? {
+    guard let index = arguments.firstIndex(of: name) else { return nil }
+    guard index + 1 < arguments.count else { throw UsageError(description: "\(name) needs a value") }
+    return arguments[index + 1]
+}
+
+func log(_ message: String) {
+    print("[\(Date().formatted(.iso8601))] \(message)")
+}
+
+func makeRadio() throws -> Radio {
+    let http = URLSessionHTTPClient()
+    let environment = ProcessInfo.processInfo.environment
+    let envFile = environment["RADIO_ENV_FILE"].map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".env")
+    return try Radio(
+        home: .standard(),
+        http: http,
+        sources: [AudacySource(http: http)],
+        notifier: PushoverNotifier(http: http, envFile: envFile)
+    )
+}
+
+func printPolls(_ results: [PollResult]) {
+    for result in results {
+        if let error = result.error {
+            log("\(result.station): feed failed: \(error)")
+        } else {
+            log("\(result.station): \(result.newPlays) new play\(result.newPlays == 1 ? "" : "s")")
+        }
+    }
+}
+
+func printSync(_ report: SyncReport) {
+    if let reason = report.skippedReason {
+        log("Sync skipped: \(reason)")
+        return
+    }
+    let added = report.added.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value)" }.joined(separator: ", ")
+    log("Sync: \(report.matched) matched, \(report.held) held for review\(added.isEmpty ? "" : "; added \(added)")")
+    if let error = report.error { log("Sync failed: \(error)") }
+}
+
+func parseMatch(_ arguments: [String]) throws -> (Int64, ReviewChoice) {
+    guard let first = arguments.first else { throw UsageError(description: "Usage: radio match <id><letter> | <id> <link>") }
+    if arguments.count >= 2, let id = Int64(first) {
+        return (id, .link(arguments[1]))
+    }
+    guard let letter = first.last, letter.isLetter, let id = Int64(first.dropLast()),
+          let ascii = letter.lowercased().unicodeScalars.first?.value, (97...122).contains(ascii)
+    else { throw UsageError(description: "Usage: radio match <id><letter> | <id> <link>") }
+    return (id, .candidate(Int(ascii) - 97))
+}
+
+func main(_ arguments: [String]) async throws -> Int32 {
+    guard let command = arguments.first else {
+        print(usage)
+        return 64
+    }
+    let rest = Array(arguments.dropFirst())
+    switch command {
+    case "help", "--help", "-h":
+        print(usage)
+    case "station":
+        let radio = try makeRadio()
+        switch rest.first {
+        case "add":
+            guard rest.count >= 2 else { throw UsageError(description: "Usage: radio station add <audacy-slug> [--name NAME]") }
+            let station = try await radio.addStation(slug: rest[1], name: try option("--name", in: rest))
+            print("Added \(station.name) (\(station.slug), feed \(station.feedID)). Its playlist will be named \"\(station.name)\".")
+        case "list":
+            for station in try await radio.stations() {
+                print("\(station.slug)\t\(station.name)\t\(station.source):\(station.feedID)\t\(station.playlistID ?? "no playlist yet")")
+            }
+        default:
+            throw UsageError(description: "Usage: radio station add|list")
+        }
+    case "poll":
+        printPolls(try await makeRadio().poll())
+    case "sync":
+        let report = try await makeRadio().sync()
+        printSync(report)
+        return report.error == nil ? 0 : 1
+    case "run":
+        let (polls, sync) = try await makeRadio().run()
+        printPolls(polls)
+        printSync(sync)
+        return polls.allSatisfy { $0.error == nil } && sync.error == nil ? 0 : 1
+    case "serve":
+        let radio = try makeRadio()
+        let port = UInt16(try option("--port", in: rest) ?? "8102") ?? 8102
+        let dashboard = Dashboard(radio: radio)
+        let server = try WebServer(port: port) { await dashboard.handle($0) }
+        let actual = try await server.start()
+        log("Serving the dashboard on port \(actual); alerts link to \(radio.dashboardURL)")
+        while true { try await Task.sleep(for: .seconds(3600)) }
+    case "unmatched":
+        let songs = try await makeRadio().heldSongs()
+        if songs.isEmpty { print("Nothing to review.") }
+        for song in songs {
+            print("\(song.id)  \(song.artist) – \(song.title)  (\(song.playCount) play\(song.playCount == 1 ? "" : "s") on \(song.stations.joined(separator: ", ")), last \(displayTime(song.lastPlayedAt)))")
+            for (index, candidate) in song.candidates.enumerated() {
+                let explicit = candidate.isExplicit ? " [explicit]" : ""
+                print("    \(song.id)\(candidateLetter(index))  \(candidate.artistName) – \(candidate.name) (\(candidate.albumName))\(explicit)  \(candidate.url)")
+            }
+            if song.candidates.isEmpty { print("    (no candidates)") }
+        }
+    case "match":
+        let (id, choice) = try parseMatch(rest)
+        let song = try await makeRadio().match(songID: id, choice: choice)
+        print("Matched to \(song.artistName) – \(song.name). It joins playlists on the next sync.")
+    case "ignore":
+        guard let id = rest.first.flatMap({ Int64($0) }) else { throw UsageError(description: "Usage: radio ignore <id>") }
+        try await makeRadio().ignore(songID: id)
+        print("Ignored song \(id).")
+    case "credentials":
+        let radio = try makeRadio()
+        switch rest.first {
+        case "set":
+            guard let keyID = try option("--key-id", in: rest), let teamID = try option("--team-id", in: rest),
+                  let keyFile = try option("--key-file", in: rest)
+            else { throw UsageError(description: "Usage: radio credentials set --key-id ID --team-id ID --key-file AuthKey.p8") }
+            let pem = try String(contentsOfFile: (keyFile as NSString).expandingTildeInPath, encoding: .utf8)
+            try await radio.setCredentials(keyID: keyID, teamID: teamID, keyPEM: pem)
+            print("Saved MusicKit key \(keyID) for team \(teamID). Next, open \(radio.signInURL) on this Mac to sign in to Apple Music.")
+        case "show":
+            guard let saved = try await radio.savedCredentials() else {
+                print("Apple Music isn't configured. Run `radio credentials set`.")
+                break
+            }
+            print("Key ID: \(saved.keyID)\nTeam ID: \(saved.teamID)")
+            print("Signed in: \(saved.musicUserToken == nil ? "no" : "yes, \(saved.userTokenSavedAt.map(displayTime) ?? "date unknown")")")
+            print("Storefront: \(saved.storefront ?? "unknown")")
+        default:
+            throw UsageError(description: "Usage: radio credentials set|show")
+        }
+    case "status":
+        let radio = try makeRadio()
+        let status = try await radio.status(recentPlays: 1, recentlyAdded: 0)
+        switch status.appleMusic {
+        case .notConfigured: print("Apple Music: not set up (run `radio credentials set`)")
+        case .needsSignIn: print("Apple Music: sign-in needed (open \(radio.signInURL) on this Mac)")
+        case .rejected(let since): print("Apple Music: sign-in rejected since \(displayTime(since)) (open \(radio.signInURL) on this Mac)")
+        case .connected(let storefront, let signedInAt):
+            print("Apple Music: connected (\(storefront)), signed in \(signedInAt.map(displayTime) ?? "at an unknown time")")
+        }
+        print("Last sync: \(status.lastSyncAt.map(displayTime) ?? "never")\(status.lastSyncError.map { " (failed: \($0))" } ?? "")")
+        print("Songs to review: \(status.heldCount)")
+        for summary in status.stations {
+            let station = summary.station
+            let feed = station.pollFailingSince.map { "failing since \(displayTime($0)): \(station.lastPollError ?? "")" }
+                ?? station.lastPollOKAt.map { "read \(displayTime($0))" } ?? "not read yet"
+            print("\(station.name): feed \(feed); \(summary.playCount) plays; \(summary.playlistCount) songs in playlist")
+        }
+    case "export":
+        print(try await makeRadio().exportCSV(stationSlug: try option("--station", in: rest)), terminator: "")
+    default:
+        throw UsageError(description: "Unknown command \(command). Run `radio help`.")
+    }
+    return 0
+}
+
+// launchd sends output to log files; flush each line as it's written.
+setvbuf(stdout, nil, _IOLBF, 0)
+
+do {
+    exit(try await main(Array(CommandLine.arguments.dropFirst())))
+} catch let error as UsageError {
+    FileHandle.standardError.write(Data("\(error.description)\n".utf8))
+    exit(64)
+} catch {
+    FileHandle.standardError.write(Data("radio: \(error)\n".utf8))
+    exit(1)
+}

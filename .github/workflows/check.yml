@@ -23,4 +23,6 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install --yes shellcheck
       - name: Check repository
-        run: bin/check --full
+        # Application checks need macOS; run bin/check --full locally before merging.
+        # See docs/design.md#run-application-checks-locally-not-in-ci.
+        run: bin/check

@@ -1,0 +1,63 @@
+#!/bin/sh
+# Build Radio, install it as ~/.local/bin/radio, and (re)load its two LaunchAgents:
+# com.jubishop.radio.run every 15 minutes and com.jubishop.radio.serve always.
+set -eu
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+bin_dir="$HOME/.local/bin"
+log_dir="$HOME/Library/Logs/Radio"
+agents="$HOME/Library/LaunchAgents"
+domain="gui/$(id -u)"
+
+swift build --package-path "$root" -c release
+built="$(swift build --package-path "$root" -c release --show-bin-path)/radio"
+mkdir -p "$bin_dir" "$log_dir" "$agents"
+/usr/bin/install -m 0755 "$built" "$bin_dir/radio.new"
+mv -f "$bin_dir/radio.new" "$bin_dir/radio"
+
+# write_agent LABEL SCHEDULE_XML ARGUMENT...
+write_agent() {
+  label=$1
+  schedule=$2
+  shift 2
+  arguments=""
+  for argument in "$@"; do
+    arguments="$arguments    <string>$argument</string>
+"
+  done
+  cat > "$agents/$label.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$bin_dir/radio</string>
+$arguments  </array>
+$schedule
+  <key>StandardOutPath</key>
+  <string>$log_dir/$label.log</string>
+  <key>StandardErrorPath</key>
+  <string>$log_dir/$label.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
+PLIST
+  plutil -lint -s "$agents/$label.plist"
+  launchctl bootout "$domain/$label" 2>/dev/null || true
+  launchctl bootstrap "$domain" "$agents/$label.plist"
+}
+
+write_agent com.jubishop.radio.run "  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>" run
+write_agent com.jubishop.radio.serve "  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>" serve
+
+echo "Installed $bin_dir/radio and loaded com.jubishop.radio.run and com.jubishop.radio.serve."
+echo "Logs: $log_dir. Dashboard: http://jubi.local:8102"
