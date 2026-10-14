@@ -406,6 +406,37 @@ recommended macOS CI job, which would have cost 10× Actions minutes on this
 private repository. The tradeoff is that nothing enforces the application
 checks.
 
+## Accepted implementation defaults
+
+Accepted 2026-10-13. The user approved these proposed defaults that day.
+td-b818f2 records the user-approved deploys of the single "Radio" playlist
+and "Radio Archive".
+
+- **Upgrading to one playlist:** the web API can't rename a playlist or
+  remove its entries, so the upgrade doesn't reuse a station's playlist. The
+  first sync after it creates "Radio" with the 100 most recently played
+  matched songs, in order of latest play. Each station's old playlist, such
+  as "Alt 102.1", stops changing and stays in Music until it's deleted by
+  hand.
+- **Upgrading to the archive:** the first sync after the upgrade creates
+  "Radio Archive" with every matched song, in order of latest play. "Radio"
+  keeps its entries.
+- **Dropping songs:** for each playlist, each sync first drops, through
+  Music.app, every entry outside its limit of most recently played songs, and
+  then places new and re-played songs. An entry to drop that Music.app can't
+  find was removed by hand, and Radio forgets it.
+- **Station credit:** a song added to "Radio" is credited to the station
+  whose play placed it, which is its latest play at that time. The
+  dashboard lists each station's credited songs as "just added".
+- **Placing in practice:** Music.app finds a playlist by its persistent ID,
+  then by name, and makes one if neither finds it. It finds an entry by its
+  catalog title and artist, or for a new song, a library track. It deletes
+  every entry for that library track and adds the track back, which appends
+  it. A song removed by hand is placed again on its next play. Radio asks
+  Apple to add every song it's about to place to the library, unless it
+  asked within the hour; adding a song that's already there changes
+  nothing.
+
 ## Proposed implementation defaults
 
 These are conventional choices proposed on 2026-10-13. The user hasn't
@@ -441,30 +472,6 @@ explicitly approved them.
 - **Song identity:** a song is its normalized primary artist plus its title
   without parenthetical suffixes. The playlist holds an Apple Music catalog
   ID at most once.
-- **Upgrading to one playlist:** the web API can't rename a playlist or
-  remove its entries, so the upgrade doesn't reuse a station's playlist. The
-  first sync after it creates "Radio" with the 100 most recently played
-  matched songs, in order of latest play. Each station's old playlist, such
-  as "Alt 102.1", stops changing and stays in Music until it's deleted by
-  hand.
-- **Upgrading to the archive:** the first sync after the upgrade creates
-  "Radio Archive" with every matched song, in order of latest play. "Radio"
-  keeps its entries.
-- **Dropping songs:** for each playlist, each sync first drops, through
-  Music.app, every entry outside its limit of most recently played songs, and
-  then places new and re-played songs. An entry to drop that Music.app can't
-  find was removed by hand, and Radio forgets it.
-- **Station credit:** a song added to "Radio" is credited to the station
-  whose play placed it, which is its latest play at that time. The
-  dashboard lists each station's credited songs as "just added".
-- **Placing in practice:** Music.app finds a playlist by its persistent ID,
-  then by name, and makes one if neither finds it. It finds an entry by its
-  catalog title and artist, or for a new song, a library track. It deletes
-  every entry for that library track and adds the track back, which appends
-  it. A song removed by hand is placed again on its next play. Radio asks
-  Apple to add every song it's about to place to the library, unless it
-  asked within the hour; adding a song that's already there changes
-  nothing.
 - **Rule changes apply to old matches:** each sync rechecks automatic matches
   against the current rules. Any the rules now reject are removed through
   Music.app and matched again. On 2026-10-13 the first release was found to
