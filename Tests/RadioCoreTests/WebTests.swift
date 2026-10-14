@@ -109,6 +109,19 @@ import Testing
         #expect((missing as? HTTPURLResponse)?.statusCode == 404)
     }
 
+    @Test func anHTTPSRequestFailsAtOnceInsteadOfHanging() async throws {
+        let harness = try Harness()
+        let dashboard = Dashboard(radio: harness.radio)
+        let server = try WebServer(port: 0) { await dashboard.handle($0) }
+        let port = try await server.start()
+        defer { server.stop() }
+
+        let request = URLRequest(url: URL(string: "https://127.0.0.1:\(port)/")!, timeoutInterval: 5)
+        let start = ContinuousClock.now
+        await #expect(throws: (any Error).self) { try await URLSession.shared.data(for: request) }
+        #expect(ContinuousClock.now - start < .seconds(2))
+    }
+
     @Test func theServerTreatsLocalConnectionsAsThisMac() async throws {
         let harness = try Harness()
         try await harness.radio.setCredentials(keyID: "KEY123", teamID: "TEAM456", keyPEM: P256.Signing.PrivateKey().pemRepresentation)

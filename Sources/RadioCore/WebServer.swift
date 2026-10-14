@@ -97,6 +97,12 @@ public final class WebServer: Sendable {
             guard let self else { return connection.cancel() }
             var buffer = buffer
             if let data { buffer.append(data) }
+            // A request starts with a method in capital letters. Anything
+            // else, such as the TLS handshake of an https:// URL, would wait
+            // forever for a request that never comes, so close it at once.
+            if let first = buffer.first, !(UInt8(ascii: "A")...UInt8(ascii: "Z")).contains(first) {
+                return connection.cancel()
+            }
             if let request = parseRequest(buffer, isLoopback: isLoopback(connection.currentPath?.remoteEndpoint)) {
                 let handler = self.handler
                 Task {

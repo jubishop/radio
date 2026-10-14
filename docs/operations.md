@@ -77,7 +77,8 @@ shows "sign-in expired". Repeat step 4.
 
 - **Dashboard:** <http://jubi.local:8102> from any device on the home network.
   It shows recent plays, songs just added, feed and sync health, and the
-  review queue. It refreshes every minute.
+  review queue. It refreshes every minute. Radio serves plain HTTP, so an
+  `https://` address fails at once; use `http://`.
 - **Review:** <http://jubi.local:8102/review>, or in Terminal use
   `radio unmatched`, then `radio match 12a`, `radio match 12 <apple-music-link>`,
   or `radio ignore 12`. A weekly Pushover nudge links to the review page when
