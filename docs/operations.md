@@ -57,17 +57,18 @@ station feeds. Run `radio sync` to do it immediately.
 Both playlists end with the most recently played song. Sort one by
 **Playlist Order, descending** to see it newest first.
 
-Radio moves re-played songs to the end and drops old ones through Music.app,
-so Music.app on the Mac mini must stay signed in with **Sync Library** on.
+Music.app makes every change to the playlists, so Music.app on the Mac mini
+must stay signed in with **Sync Library** on. Radio asks Apple to add a new
+song to your library, and Music.app puts it in the playlists once it reaches
+the Mac, usually on the next run, about 15 minutes later.
 Approve "radio wants access to control Music" the first time Radio uses it.
 The prompt stays up for only two minutes, during a scheduled run that has a
-song to move or drop. To bring it up while you're at the Mac mini, run
+song to place or drop. To bring it up while you're at the Mac mini, run
 `launchctl kickstart gui/$(id -u)/com.jubishop.radio.run`. Once you've
 answered, change the choice in System Settings > Privacy & Security >
 Automation. `bin/deploy` signs the binary with your Apple Development
 identity, so the approval lasts across updates. Until Music.app works, the
-dashboard shows why, new songs keep being added, and moves and drops wait,
-so "Radio" can pass 100 songs.
+dashboard shows why and the playlists don't change.
 
 When the sign-in expires, Radio sends one Pushover alert and the dashboard
 shows "sign-in expired". Repeat step 4.

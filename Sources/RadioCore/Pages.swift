@@ -16,7 +16,7 @@ enum Pages {
             body += "<p class=\"problem\">Last sync failed: \(escape(error))</p>"
         }
         if let error = status.musicAppError {
-            body += "<p class=\"problem\">Music.app can't move re-played songs: \(escape(error))</p>"
+            body += "<p class=\"problem\">Music.app can't update the playlists: \(escape(error))</p>"
         }
         body += "</header>"
         if status.stations.isEmpty {
@@ -147,7 +147,7 @@ enum Pages {
         let token = String(decoding: (try? JSONEncoder().encode(developerToken)) ?? Data("\"\"".utf8), as: UTF8.self)
         let body = """
             <header><p><a href="/">← Radio</a></p><h1>Sign in to Apple Music</h1>
-            <p class="meta">Radio needs permission to add songs to playlists in your library. Apple asks again about every six months.</p></header>
+            <p class="meta">Radio needs permission to add songs to your library. Apple asks again about every six months.</p></header>
             <p><button id="signin" disabled>Loading MusicKit…</button></p>
             <p id="result" class="notice" hidden></p>
             <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" data-web-components async></script>

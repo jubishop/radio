@@ -73,7 +73,8 @@ func printSync(_ report: SyncReport) {
         return
     }
     let changes = report.playlists.sorted { $0.key < $1.key }.compactMap { name, changes -> String? in
-        let parts = [("added", changes.added), ("moved to the end", changes.moved), ("dropped", changes.dropped)]
+        let parts = [("added", changes.added), ("moved to the end", changes.moved), ("dropped", changes.dropped),
+                     ("waiting for the library", changes.waiting)]
             .filter { $0.1 > 0 }.map { "\($0.0) \($0.1)" }
         return parts.isEmpty ? nil : "\(name): " + parts.joined(separator: ", ")
     }

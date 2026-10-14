@@ -48,7 +48,7 @@ public struct AppleMusicClient: Sendable {
     static let base = "https://api.music.apple.com/v1"
     /// Apple's documented maximum page size for song search.
     static let searchLimit = 25
-    /// Tracks per add request, to keep request bodies modest.
+    /// Songs per library request, to keep URLs short.
     static let batchSize = 100
 
     public init(http: HTTPClient, developerToken: String, userToken: String?, storefront: String) {
@@ -95,27 +95,15 @@ public struct AppleMusicClient: Sendable {
         return id
     }
 
-    /// Creates a library playlist holding the given catalog songs and returns
-    /// its library ID.
-    public func createPlaylist(name: String, description: String, songIDs: [String]) async throws -> String {
-        let body: [String: Any] = [
-            "attributes": ["name": name, "description": description],
-            "relationships": ["tracks": ["data": songIDs.map { ["id": $0, "type": "songs"] }]],
-        ]
-        let response: Resources = try await request(
-            "POST", URL(string: "\(Self.base)/me/library/playlists")!,
-            body: try JSONSerialization.data(withJSONObject: body)
-        )
-        guard let id = response.data.first?.id else {
-            throw SourceError(description: "Apple Music created a playlist but returned no ID")
+    /// Asks Apple to add catalog songs to the library, which reach Music.app
+    /// after a delay. Apple skips songs it can't add.
+    public func addToLibrary(songIDs: [String]) async throws {
+        for start in stride(from: 0, to: songIDs.count, by: Self.batchSize) {
+            let batch = songIDs[start..<min(start + Self.batchSize, songIDs.count)]
+            var components = URLComponents(string: "\(Self.base)/me/library")!
+            components.queryItems = [URLQueryItem(name: "ids[songs]", value: batch.joined(separator: ","))]
+            _ = try await send("POST", components.url!)
         }
-        return id
-    }
-
-    public func addSongs(_ songIDs: [String], toPlaylist playlistID: String) async throws {
-        let body = ["data": songIDs.map { ["id": $0, "type": "songs"] }]
-        let url = URL(string: "\(Self.base)/me/library/playlists/\(playlistID)/tracks")!
-        _ = try await send("POST", url, body: try JSONSerialization.data(withJSONObject: body))
     }
 
     private func request<T: Decodable>(_ method: String, _ url: URL, body: Data? = nil) async throws -> T {

@@ -1,33 +1,63 @@
 import Foundation
 
 public enum MusicAppAction: String, Sendable {
-    /// Moves the song's entry to the end of the playlist.
-    case move
+    /// Puts the song at the end of the playlist: removes any entries it has
+    /// there, then adds its library track. Makes the playlist if it's missing.
+    case place
     /// Removes the song's entries from the playlist, keeping it in the library.
     case remove
 }
 
-/// What Music.app did. Playlist IDs are Music.app's persistent IDs, which
-/// differ from the web API's library playlist IDs.
+/// A playlist as Music.app finds it: by persistent ID once Radio knows it,
+/// otherwise by name.
+public struct MusicAppPlaylist: Sendable {
+    public var id: String?
+    public var name: String
+    /// Given to the playlist when Music.app makes it.
+    public var description: String
+
+    public init(id: String?, name: String, description: String) {
+        self.id = id
+        self.name = name
+        self.description = description
+    }
+}
+
+/// A song as Music.app finds it: by title and artist, since Music.app
+/// scripting has no catalog IDs, preferring a library track from the album.
+public struct MusicAppSong: Sendable {
+    public var name: String
+    public var artist: String
+    public var album: String
+
+    public init(name: String, artist: String, album: String) {
+        self.name = name
+        self.artist = artist
+        self.album = album
+    }
+}
+
+/// What Music.app did. Playlist IDs are Music.app's persistent IDs.
 public enum MusicAppResult: Equatable, Sendable {
-    case moved(playlistID: String)
-    /// Also returned when a move removed the entry but couldn't add it back.
+    case placed(playlistID: String)
+    /// Also returned when placing removed the entry but couldn't add it back.
     case removed(playlistID: String)
-    /// The playlist has no entry with that title and artist, perhaps because
-    /// a song added through the web API hasn't synced to this Mac yet.
+    /// The playlist has no entry with that title and artist.
     case trackNotFound(playlistID: String)
-    /// The entry exists but its song isn't in the library, so it can't be
-    /// re-added. Nothing was changed.
+    /// The library has no track for the song, perhaps because a song added
+    /// to the library through the web API hasn't reached this Mac yet.
+    /// Nothing was changed.
     case notInLibrary(playlistID: String)
     case playlistNotFound
     case ambiguousPlaylist
 }
 
-/// Edits playlists through Music.app, which can remove entries; the web API
-/// can only add them. See docs/design.md.
+/// Edits playlists through Music.app, the only thing that changes them.
+/// Music.app uploads its whole copy of a playlist it changed, which would
+/// wipe out songs the web API added that hadn't reached this Mac yet. See
+/// docs/design.md.
 public protocol MusicApp: Sendable {
-    func perform(_ action: MusicAppAction, playlistID: String?, playlistName: String,
-                 songName: String, songArtist: String) async throws -> MusicAppResult
+    func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult
 }
 
 /// Runs AppleScript in Music.app through `osascript`. Values travel as
@@ -39,13 +69,14 @@ public struct ScriptedMusicApp: MusicApp {
         self.timeout = timeout
     }
 
-    public func perform(_ action: MusicAppAction, playlistID: String?, playlistName: String,
-                        songName: String, songArtist: String) async throws -> MusicAppResult {
-        let output = try await runOSAScript(arguments: [action.rawValue, playlistID ?? "", playlistName, songName, songArtist])
+    public func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult {
+        let output = try await runOSAScript(arguments: [
+            action.rawValue, playlist.id ?? "", playlist.name, playlist.description, song.name, song.artist, song.album,
+        ])
         let parts = output.split(separator: " ", maxSplits: 1).map(String.init)
         let id = parts.count > 1 ? parts[1] : ""
         switch parts.first {
-        case "moved": return .moved(playlistID: id)
+        case "placed": return .placed(playlistID: id)
         case "removed": return .removed(playlistID: id)
         case "no-track": return .trackNotFound(playlistID: id)
         case "not-in-library": return .notInLibrary(playlistID: id)
@@ -95,40 +126,57 @@ public struct ScriptedMusicApp: MusicApp {
         return RadioError("Music couldn't update the playlist: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
 
-    /// Finds the playlist by persistent ID, or by name before Radio knows its
-    /// ID. Entries are found by title and artist, since Music.app scripting
-    /// has no catalog IDs. A move deletes every entry for the song (by its
-    /// library database ID) and adds the library track back, which appends it;
-    /// script positions follow the playlist's view sort, so they can't be used.
+    /// Finds the playlist by persistent ID, then by name, and makes it when
+    /// placing a song and there's none. Entries and library tracks are found
+    /// by title and artist. Placing deletes every entry for the song's
+    /// library track (by its database ID) and adds the track back, which
+    /// appends it; script positions follow the playlist's view sort, so they
+    /// can't be used.
     static let script = """
         on run argv
-            set {action, playlistID, playlistName, songName, songArtist} to argv
+            set {action, playlistID, playlistName, playlistDescription, songName, songArtist, songAlbum} to argv
             tell application "Music"
-                if playlistID is not "" then
-                    set found to (every user playlist whose persistent ID is playlistID)
-                else
-                    set found to (every user playlist whose name is playlistName and smart is false)
-                end if
-                if (count of found) is 0 then return "no-playlist"
+                set found to {}
+                if playlistID is not "" then set found to (every user playlist whose persistent ID is playlistID)
+                if (count of found) is 0 then set found to (every user playlist whose name is playlistName and smart is false)
                 if (count of found) > 1 then return "ambiguous-playlist"
-                set target to item 1 of found
+                if (count of found) is 1 then
+                    set target to item 1 of found
+                else if action is "remove" then
+                    return "no-playlist"
+                else
+                    set target to make new user playlist with properties {name:playlistName}
+                    try
+                        set description of target to playlistDescription
+                    end try
+                end if
                 set targetID to persistent ID of target
                 set entries to (every track of target whose name is songName and artist is songArtist)
-                if (count of entries) is 0 then return "no-track " & targetID
-                set songID to database ID of item 1 of entries
-                if action is "move" then
-                    set libraryTracks to (every track of library playlist 1 whose database ID is songID)
-                    if (count of libraryTracks) is 0 then return "not-in-library " & targetID
-                    set libraryTrack to item 1 of libraryTracks
+                if action is "remove" then
+                    if (count of entries) is 0 then return "no-track " & targetID
+                    set songID to database ID of item 1 of entries
+                    delete (every track of target whose database ID is songID)
+                    return "removed " & targetID
                 end if
+                if (count of entries) > 0 then
+                    set entryID to database ID of item 1 of entries
+                    set libraryTracks to (every track of library playlist 1 whose database ID is entryID)
+                else
+                    set libraryTracks to (every track of library playlist 1 whose name is songName and artist is songArtist and album is songAlbum)
+                    if (count of libraryTracks) is 0 then
+                        set libraryTracks to (every track of library playlist 1 whose name is songName and artist is songArtist)
+                    end if
+                end if
+                if (count of libraryTracks) is 0 then return "not-in-library " & targetID
+                set libraryTrack to item 1 of libraryTracks
+                set songID to database ID of libraryTrack
                 delete (every track of target whose database ID is songID)
-                if action is "remove" then return "removed " & targetID
                 try
                     duplicate libraryTrack to target
                 on error
                     return "removed " & targetID
                 end try
-                return "moved " & targetID
+                return "placed " & targetID
             end tell
         end run
         """

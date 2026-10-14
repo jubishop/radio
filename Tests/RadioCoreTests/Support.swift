@@ -86,14 +86,33 @@ final class FakeAudacy: Sendable {
     }
 }
 
-/// The parts of the Apple Music API Radio uses, with library state.
+/// The parts of the Apple Music API Radio uses, with two copies of the
+/// library: Apple's, which the API changes, and Music.app's on the Mac. A
+/// sync uploads each playlist Music.app changed, replacing Apple's copy, and
+/// downloads everything else, so a Music.app edit would wipe out songs added
+/// on Apple's side that Music.app hadn't downloaded yet. Every change syncs
+/// at once unless syncing is delayed.
 final class FakeAppleMusic: Sendable {
     struct Playlist { var name: String; var songIDs: [String] }
+    struct Library {
+        var playlists: [String: Playlist] = [:]
+        var order: [String] = []
+        /// Catalog songs in the library.
+        var songIDs: Set<String> = []
+    }
+    struct State {
+        var apple = Library()
+        var mac = Library()
+        /// Playlists Music.app changed since the last sync.
+        var edited: Set<String> = []
+        var syncDelayed = false
+        /// Catalog songs that don't reach Music.app.
+        var withheld: Set<String> = []
+        var playlistsCreated = 0
+    }
     private let catalog = Mutex<[CatalogSong]>([])
-    private let library = Mutex<(playlists: [String: Playlist], order: [String])>(([:], []))
+    private let state = Mutex(State())
     private let userStatus = Mutex(200)
-    /// Catalog songs whose entries haven't synced to Music.app yet.
-    private let unsynced = Mutex<Set<String>>([])
 
     init(http: FakeHTTP) {
         http.on("GET https://api.music.apple.com/v1/catalog/us/search") { [self] request in
@@ -120,30 +139,36 @@ final class FakeAppleMusic: Sendable {
             let status = userStatus.withLock { $0 }
             return status == 200 ? json(["data": [["id": "us", "type": "storefronts"]]]) : json([:], status: status)
         }
-        http.on("POST https://api.music.apple.com/v1/me/library/playlists") { [self] request in
+        http.on("POST https://api.music.apple.com/v1/me/library?") { [self] request in
             let status = userStatus.withLock { $0 }
             guard status == 200 else { return json([:], status: status) }
-            let body = try! JSONSerialization.jsonObject(with: request.body!) as! [String: Any]
-            if request.url.lastPathComponent == "tracks" {
-                let id = request.url.deletingLastPathComponent().lastPathComponent
-                let ids = (body["data"] as! [[String: String]]).map { $0["id"]! }
-                let found = library.withLock { library -> Bool in
-                    guard library.playlists[id] != nil else { return false }
-                    library.playlists[id]!.songIDs += ids
-                    return true
-                }
-                return found ? HTTPResponse(status: 204, body: Data()) : json([:], status: 404)
-            }
-            let name = (body["attributes"] as! [String: String])["name"]!
-            let tracks = ((body["relationships"] as? [String: Any])?["tracks"] as? [String: Any])?["data"] as? [[String: String]] ?? []
-            let id = library.withLock { library -> String in
-                let id = "p.\(library.order.count + 1)"
-                library.playlists[id] = Playlist(name: name, songIDs: tracks.map { $0["id"]! })
-                library.order.append(id)
-                return id
-            }
-            return json(["data": [["id": id, "type": "library-playlists"]]], status: 201)
+            let ids = (URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "ids[songs]" }?.value ?? "").split(separator: ",").map(String.init)
+            let known = Set(catalog.withLock { $0 }.map(\.id))
+            change { $0.apple.songIDs.formUnion(ids.filter(known.contains)) }
+            return HTTPResponse(status: 202, body: Data())
         }
+    }
+
+    /// Makes a change, then syncs unless syncing is delayed.
+    private func change<T>(_ body: (inout State) -> T) -> T {
+        state.withLock { state in
+            let result = body(&state)
+            if !state.syncDelayed { Self.sync(&state) }
+            return result
+        }
+    }
+
+    private static func sync(_ state: inout State) {
+        for id in state.edited {
+            state.apple.playlists[id] = state.mac.playlists[id]
+            if !state.apple.order.contains(id) { state.apple.order.append(id) }
+        }
+        for (id, playlist) in state.apple.playlists where !state.edited.contains(id) {
+            state.mac.playlists[id] = Playlist(name: playlist.name, songIDs: playlist.songIDs.filter { !state.withheld.contains($0) })
+        }
+        state.mac.songIDs = state.apple.songIDs.subtracting(state.withheld)
+        state.edited = []
     }
 
     @discardableResult
@@ -158,38 +183,54 @@ final class FakeAppleMusic: Sendable {
         }
     }
 
-    /// The library playlists Radio created, by name, with song titles in order.
+    /// Apple's copy of the playlists, by name, with song titles in order.
     func playlists() -> [String: [String]] {
         let titles = Dictionary(uniqueKeysWithValues: catalog.withLock { $0 }.map { ($0.id, $0.name) })
-        return library.withLock { library in
-            Dictionary(library.playlists.values.map { ($0.name, $0.songIDs.map { titles[$0] ?? $0 }) }, uniquingKeysWith: { first, _ in first })
+        return state.withLock { state in
+            Dictionary(state.apple.playlists.values.map { ($0.name, $0.songIDs.map { titles[$0] ?? $0 }) },
+                       uniquingKeysWith: { first, _ in first })
         }
     }
 
     /// Playlists by name, counting duplicates that `playlists()` would merge.
     func playlistNames() -> [String] {
-        library.withLock { library in library.order.compactMap { library.playlists[$0]?.name } }
+        state.withLock { state in state.apple.order.compactMap { state.apple.playlists[$0]?.name } }
     }
 
-    /// Adds a playlist directly, as if an earlier version of Radio created it.
+    /// Adds a playlist to Apple's copy, as if an earlier version of Radio
+    /// created it through the API.
     func seedPlaylist(name: String, songIDs: [String]) -> String {
-        library.withLock { library in
-            let id = "p.\(library.order.count + 1)"
-            library.playlists[id] = Playlist(name: name, songIDs: songIDs)
-            library.order.append(id)
+        change { state in
+            state.playlistsCreated += 1
+            let id = "p.\(state.playlistsCreated)"
+            state.apple.playlists[id] = Playlist(name: name, songIDs: songIDs)
+            state.apple.order.append(id)
+            state.apple.songIDs.formUnion(songIDs)
             return id
         }
     }
 
-    func setSyncedToMusicApp(_ title: String, _ isSynced: Bool) {
+    /// While delayed, changes stay where they were made until `syncMusicApp`.
+    func setSyncDelayed(_ delayed: Bool) {
+        state.withLock { $0.syncDelayed = delayed }
+    }
+
+    func syncMusicApp() {
+        state.withLock { Self.sync(&$0) }
+    }
+
+    /// Keeps a song's library track and entries from reaching Music.app.
+    func setReachesMusicApp(_ title: String, _ reaches: Bool) {
         let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
-        unsynced.withLock { if isSynced { $0.subtract(ids) } else { $0.formUnion(ids) } }
+        change { state in
+            if reaches { state.withheld.subtract(ids) } else { state.withheld.formUnion(ids) }
+        }
     }
 
     /// Removes a song from a playlist the way a person would in Music.
     func removeByHand(_ title: String, from name: String) {
         let ids = Set(catalog.withLock { $0 }.filter { $0.name == title }.map(\.id))
-        library.withLock { library in
+        editByHand { library in
             for (id, playlist) in library.playlists where playlist.name == name {
                 library.playlists[id]!.songIDs.removeAll(where: ids.contains)
             }
@@ -197,42 +238,64 @@ final class FakeAppleMusic: Sendable {
     }
 
     func renamePlaylist(_ name: String, to newName: String) {
-        library.withLock { library in
+        editByHand { library in
             for (id, playlist) in library.playlists where playlist.name == name {
                 library.playlists[id]!.name = newName
             }
         }
     }
 
-    /// Music.app's view of the same library: its own persistent IDs, and
-    /// entries found by the catalog song's title and artist.
-    func musicAppPerform(_ action: MusicAppAction, playlistID: String?, playlistName: String,
-                         songName: String, songArtist: String) -> MusicAppResult {
-        let songs = catalog.withLock { $0 }
-        return library.withLock { library in
-            let found = library.playlists.filter { id, playlist in
-                playlistID.map { "M-\(id)" == $0 } ?? (playlist.name == playlistName)
-            }
-            guard found.count == 1, let (id, playlist) = found.first else {
-                return found.isEmpty ? .playlistNotFound : .ambiguousPlaylist
-            }
-            let musicID = "M-\(id)"
-            let matching = Set(songs.filter {
-                $0.name.lowercased() == songName.lowercased() && $0.artistName.lowercased() == songArtist.lowercased()
-            }.map(\.id))
-            let hidden = unsynced.withLock { $0 }
-            guard let entry = playlist.songIDs.first(where: { matching.contains($0) && !hidden.contains($0) }) else {
-                return .trackNotFound(playlistID: musicID)
-            }
-            library.playlists[id]!.songIDs.removeAll { $0 == entry }
-            if action == .remove { return .removed(playlistID: musicID) }
-            library.playlists[id]!.songIDs.append(entry)
-            return .moved(playlistID: musicID)
+    func deleteAllPlaylists() {
+        editByHand { $0.playlists = [:] }
+    }
+
+    /// A person's edit, which reaches both copies.
+    private func editByHand(_ edit: (inout Library) -> Void) {
+        state.withLock { state in
+            edit(&state.apple)
+            edit(&state.mac)
         }
     }
 
-    func deleteAllPlaylists() {
-        library.withLock { $0.playlists = [:] }
+    /// Music.app working on its copy: its own persistent IDs, and entries and
+    /// library tracks found by the catalog song's title and artist.
+    func musicAppPerform(_ action: MusicAppAction, playlist target: MusicAppPlaylist, song: MusicAppSong) -> MusicAppResult {
+        let matching = catalog.withLock { $0 }.filter {
+            $0.name.lowercased() == song.name.lowercased() && $0.artistName.lowercased() == song.artist.lowercased()
+        }
+        return change { state in
+            var found = state.mac.playlists.filter { id, _ in target.id == "M-\(id)" }
+            if found.isEmpty { found = state.mac.playlists.filter { $0.value.name == target.name } }
+            if found.count > 1 { return .ambiguousPlaylist }
+            let id: String
+            if let existing = found.first {
+                id = existing.key
+            } else if action == .remove {
+                return .playlistNotFound
+            } else {
+                state.playlistsCreated += 1
+                id = "p.\(state.playlistsCreated)"
+                state.mac.playlists[id] = Playlist(name: target.name, songIDs: [])
+                state.edited.insert(id)
+            }
+            let musicID = "M-\(id)"
+            let ids = Set(matching.map(\.id))
+            let entry = state.mac.playlists[id]!.songIDs.first(where: ids.contains)
+            let library = matching.filter { state.mac.songIDs.contains($0.id) }
+            switch action {
+            case .remove:
+                guard let entry else { return .trackNotFound(playlistID: musicID) }
+                state.mac.playlists[id]!.songIDs.removeAll { $0 == entry }
+            case .place:
+                guard let track = entry ?? (library.first { $0.albumName == song.album } ?? library.first)?.id,
+                      state.mac.songIDs.contains(track)
+                else { return .notInLibrary(playlistID: musicID) }
+                state.mac.playlists[id]!.songIDs.removeAll { $0 == track }
+                state.mac.playlists[id]!.songIDs.append(track)
+            }
+            state.edited.insert(id)
+            return action == .remove ? .removed(playlistID: musicID) : .placed(playlistID: musicID)
+        }
     }
 
     func setUserTokenStatus(_ status: Int) {
@@ -262,13 +325,11 @@ final class FakeMusicApp: MusicApp {
         state.withLock { $0.failure = message }
     }
 
-    func perform(_ action: MusicAppAction, playlistID: String?, playlistName: String,
-                 songName: String, songArtist: String) async throws -> MusicAppResult {
+    func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult {
         if let failure = state.withLock({ state -> String? in state.calls += 1; return state.failure }) {
             throw RadioError(failure)
         }
-        return music.musicAppPerform(action, playlistID: playlistID, playlistName: playlistName,
-                                     songName: songName, songArtist: songArtist)
+        return music.musicAppPerform(action, playlist: playlist, song: song)
     }
 }
 

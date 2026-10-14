@@ -33,6 +33,14 @@ open. Feed details are in
   with every new song a station plays. On 2026-10-13, the library held 3,787
   songs, and Radio's first five hours on one station logged 66 plays of 64
   songs.
+- **Music.app overwrites a playlist it edits.** After Music.app changes a
+  playlist, it uploads its own copy, which replaces Apple's. Songs the web
+  API added that hadn't reached the Mac yet are lost, though the API reported
+  success. Apple doesn't document this. On 2026-10-13, by 7:30 PM PDT,
+  Apple's copy of "Radio" held 35 songs while Radio's database listed 100,
+  and "Radio Archive" held 94 of 166. Syncs that edited a playlist through
+  Music.app lost nearly every song the API added in that sync, and syncs
+  that didn't use Music.app lost none.
 
 ## Decisions
 
@@ -92,7 +100,9 @@ No Apple interface Radio can use reorders a playlist:
 
 Radio therefore moves the song through Music.app on the Mac mini: it copies
 the entry to the end of the same playlist, then deletes the original. New
-songs are still added through the web API. Costs:
+songs were still added through the web API until a
+[later decision](#change-the-playlists-only-through-musicapp) the same day.
+Costs:
 
 - Music.app on the Mac mini must stay signed in with Sync Library on.
 - The user approves "radio wants to control Music" once.
@@ -100,7 +110,8 @@ songs are still added through the web API. Costs:
   so that approval survives updates.
 - If Music.app can't move a song, it stays where it is. The move stays
   pending and is retried on each later sync until Music.app succeeds. A song
-  that Music.app reports as not in the library isn't retried.
+  whose track still isn't in the library an hour after Radio asked Apple to
+  add it stays where it is.
 
 The rejected alternatives were rebuilding the playlist newest-first on every
 sync, which rewrites the whole playlist and risks iCloud sync conflicts, and
@@ -109,7 +120,9 @@ keeping first-heard order.
 ### Sync through the Apple Music REST API from a headless CLI
 
 Accepted 2026-10-13. A command that launchd runs uses the Apple Music REST API
-to search the catalog, create the library playlist, and add tracks. On each
+to search the catalog and add songs to the library. Until a
+[later decision](#change-the-playlists-only-through-musicapp) the same day, it
+also created the playlists and added songs to them. On each
 run it signs its own developer token with a MusicKit `.p8` key from the user's
 paid Apple Developer team, `34TKMKM889`. The membership was confirmed from
 App Store provisioning profiles on this Mac. A local browser page uses
@@ -208,7 +221,7 @@ day put every station's songs in one playlist.
 Accepted 2026-10-13. This replaces the per-station playlists in the decision
 above. The user asked to rename the playlist to something like "Radio" so
 that every station feeds a single playlist. Radio creates the playlist on its
-first sync and then tracks it by its library playlist ID. The playlist holds
+first sync and then tracks it by its ID. The playlist holds
 each song once, however many stations play it, ordered by the song's most
 recent play on any station.
 
@@ -245,6 +258,40 @@ Accepted 2026-10-13. This replaces the archive's growth to Apple's limit.
 After learning that the library held 3,787 of its 100,000 songs, the user
 asked to cap the archive at 10,000. It drops its least recently played songs
 the same way "Radio" does.
+
+### Change the playlists only through Music.app
+
+Accepted 2026-10-13. This replaces adding songs through the web API in the
+decisions above. Music.app
+[overwrites a playlist it edits](#constraints), which had wiped out most of
+the songs the API added. The user accepted the recommendation to make
+Music.app the only thing that changes the playlists:
+
+- The web API asks Apple to add each new song to the library
+  (`POST /v1/me/library?ids[songs]=…`, which answers 202 Accepted).
+- Once the song's library track reaches the Mac, Music.app puts it at the end
+  of the playlist, the same way it moves a re-played song. Music.app finds
+  the track by title and artist, preferring the matched album.
+- Songs are placed in play order. A song whose track hasn't reached the Mac
+  holds back the songs played after it for up to an hour, and then they go
+  ahead without it.
+- Music.app also makes the playlists. If Radio's playlist is gone, Music.app
+  makes a new one, and the next sync fills it in play order.
+- Upgrading to this release places every entry again, in play order, which
+  restores the songs that were wiped out.
+
+The tradeoffs:
+
+- A new song usually appears one sync later, about 15 minutes, while its
+  library track reaches the Mac.
+- Nothing changes while Music.app isn't working.
+- Music.app can pick another version of a song with the same title, artist,
+  and album, such as the clean one.
+
+The rejected alternatives were to keep adding through the API and re-add
+lost songs, which Music.app's next upload would wipe out again, and to avoid
+Music.app edits just after API adds, which still races because Music.app
+uploads at times Radio can't see.
 
 ### Prefer explicit versions
 
@@ -352,19 +399,19 @@ explicitly approved them.
   keeps its entries.
 - **Dropping songs:** for each playlist, each sync first drops, through
   Music.app, every entry outside its limit of most recently played songs, and
-  then adds and moves. When Music.app can't drop them, new songs are still
-  added, and the playlist passes its limit until Music.app works. An entry to drop that Music.app can't
-  find is retried for an hour, like a move, and then forgotten.
+  then places new and re-played songs. An entry to drop that Music.app can't
+  find was removed by hand, and Radio forgets it.
 - **Station credit:** a song added to "Radio" is credited to the station
   whose play placed it, which is its latest play at that time. The
   dashboard lists each station's credited songs as "just added".
-- **Moves in practice:** adds and moves run in play order within each sync.
-  Music.app finds a playlist by name until it learns the playlist's
-  persistent ID, and finds an entry by its catalog title and artist. It
-  deletes every entry for that library track and adds the track back.
-  An entry Music.app can't find is retried for an hour, since a song added
-  through the web API takes time to sync to the Mac. After that, Radio treats
-  the entry as removed by hand and adds the song again on its next play.
+- **Placing in practice:** Music.app finds a playlist by its persistent ID,
+  then by name, and makes one if neither finds it. It finds an entry by its
+  catalog title and artist, or for a new song, a library track. It deletes
+  every entry for that library track and adds the track back, which appends
+  it. A song removed by hand is placed again on its next play. Radio asks
+  Apple to add every song it's about to place to the library, unless it
+  asked within the hour; adding a song that's already there changes
+  nothing.
 - **Rule changes apply to old matches:** each sync rechecks automatic matches
   against the current rules. Any the rules now reject are removed through
   Music.app and matched again. On 2026-10-13 the first release was found to

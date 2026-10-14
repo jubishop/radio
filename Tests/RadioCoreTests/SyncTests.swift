@@ -173,8 +173,8 @@ import Testing
 }
 
 @Suite struct ConcurrentSyncTests {
-    /// launchd's scheduled run and a manual `radio sync` can overlap, and the
-    /// API can't delete a duplicate playlist or remove a twice-added song.
+    /// launchd's scheduled run and a manual `radio sync` can overlap, and
+    /// both could make the playlists.
     @Test func overlappingSyncsCreateOnePlaylistAndAddEachSongOnce() async throws {
         let http = FakeHTTP(latency: .milliseconds(5))
         let first = try Harness(http: http)
@@ -188,7 +188,7 @@ import Testing
         let clock = first.clock
         let second = try Radio(
             home: first.home, http: http, sources: [AudacySource(http: http)],
-            notifier: PushoverNotifier(http: http, userKey: nil, apiKey: nil), now: { clock.now }
+            notifier: PushoverNotifier(http: http, userKey: nil, apiKey: nil), musicApp: first.musicApp, now: { clock.now }
         )
 
         async let a = first.radio.sync()

@@ -18,6 +18,9 @@ public struct PlaylistChanges: Equatable, Sendable {
     public var moved = 0
     /// Songs removed because more recently played songs filled the playlist.
     public var dropped = 0
+    /// Songs not placed yet: ones whose library track hasn't reached
+    /// Music.app, and those played after one, which wait to keep play order.
+    public var waiting = 0
 }
 
 public struct SyncReport: Sendable {
@@ -56,7 +59,7 @@ public struct RadioStatus: Sendable {
     public var appleMusic: AppleMusicState
     public var lastSyncAt: Date?
     public var lastSyncError: String?
-    /// Why Music.app couldn't move or remove a playlist entry, until it can.
+    /// Why Music.app couldn't update a playlist, until it can.
     public var musicAppError: String?
     public var heldCount: Int
 }
@@ -226,8 +229,8 @@ public actor Radio {
 
     // MARK: Syncing
 
-    /// Matches new songs, adds them to the playlists, and moves re-played
-    /// songs to the end. See PlaylistSync.swift.
+    /// Matches new songs, adds them to the playlists, moves re-played songs
+    /// to the end, and drops old ones. See PlaylistSync.swift.
     public func sync() async throws -> SyncReport {
         var report = SyncReport()
         guard let client = try client(requireUser: true) else {
@@ -235,7 +238,7 @@ public actor Radio {
             return report
         }
         // Another process (launchd's run or a manual sync) may be syncing; two
-        // syncs could create duplicate playlists, which the API can't delete.
+        // syncs could each make the playlists.
         guard let lock = try ProcessLock(url: home.syncLockURL) else {
             report.skippedReason = "Another sync is running."
             return report

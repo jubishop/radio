@@ -54,6 +54,25 @@ import Testing
         #expect(try await harness.radio.status().playlistCount == 3)
     }
 
+    /// Music.app uploads its whole copy of a playlist it changed, so a song
+    /// added on Apple's side that Music.app hadn't downloaded yet was lost
+    /// (2026-10-13: "Radio" held 35 of 100 songs).
+    @Test func songsAddedWhileMusicIsBehindAreKept() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
+        harness.music.setSyncDelayed(true)
+        harness.music.addToCatalog("Band", "D")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        _ = try await harness.radio.run()
+        harness.music.syncMusicApp()
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        harness.music.syncMusicApp()
+
+        #expect(harness.music.playlists() == ["Radio": ["B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"]])
+        #expect(try await harness.radio.status().playlistCount == 3)
+    }
+
     @Test func theArchiveKeepsEverySongAndMovesReplays() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
         harness.music.addToCatalog("Band", "D")
@@ -97,18 +116,16 @@ import Testing
     @Test func aBacklogAddsOnlyTheMostRecentlyPlayedSongs() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C", "D", "E"], playlistLimit: 3)
         #expect(harness.music.playlists() == ["Radio": ["C", "D", "E"], "Radio Archive": ["A", "B", "C", "D", "E"]])
-        #expect(harness.musicApp.calls == 0)
     }
 
-    @Test func aFullPlaylistShrinksOnceMusicCanRemoveSongs() async throws {
+    @Test func thePlaylistsCatchUpOnceMusicWorksAgain() async throws {
         let harness = try await harnessWithSongs(["A", "B"], playlistLimit: 2)
         harness.music.addToCatalog("Band", "C")
         harness.musicApp.fail(with: "Radio isn't allowed to control Music")
         harness.clock.advance(hours: 1)
         harness.play("Band", "C")
         _ = try await harness.radio.run()
-        // New songs still arrive while Music.app can't remove old ones.
-        #expect(harness.music.playlists()["Radio"] == ["A", "B", "C"])
+        #expect(harness.music.playlists()["Radio"] == ["A", "B"])
 
         harness.musicApp.fail(with: nil)
         harness.clock.advance(hours: 0.25)
@@ -137,12 +154,13 @@ import Testing
         harness.play("Band", "B", minutesAgo: 6)
         harness.play("Band", "A", minutesAgo: 3)
         _ = try await harness.radio.run()
+        let calls = harness.musicApp.calls
         harness.clock.advance(hours: 1)
         _ = try await harness.radio.run()
 
         // Each song is added at its latest play, so nothing needs moving.
         #expect(harness.music.playlists()["Radio"] == ["B", "A"])
-        #expect(harness.musicApp.calls == 0)
+        #expect(harness.musicApp.calls == calls)
     }
 
     @Test func aMoveMusicCannotMakeIsReportedAndRetried() async throws {
@@ -175,18 +193,56 @@ import Testing
         #expect(harness.music.playlists()["Radio Songs"] == ["C", "A", "B"])
     }
 
-    @Test func anEntryMusicCannotSeeYetIsRetriedRatherThanAddedAgain() async throws {
-        let harness = try await harnessWithSongs(["A", "B", "C"])
-        harness.music.setSyncedToMusicApp("A", false)
+    @Test func aNewSongWaitsUntilItsLibraryTrackReachesMusic() async throws {
+        let harness = try await harnessWithSongs(["A", "B"])
+        let song = harness.music.addToCatalog("Band", "C")
+        harness.music.setReachesMusicApp("C", false)
         harness.clock.advance(hours: 0.25)
+        harness.play("Band", "C")
+        let (_, waiting) = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["A", "B"])
+        #expect(waiting.playlists["Radio"]?.waiting == 1)
+
+        harness.music.setReachesMusicApp("C", true)
+        harness.clock.advance(hours: 0.25)
+        let (_, placed) = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["A", "B", "C"])
+        #expect(placed.playlists["Radio"]?.added == 1)
+        // Apple was asked once to add the song to the library.
+        #expect(harness.http.requests("POST https://api.music.apple.com/v1/me/library?")
+            .filter { $0.url.query?.contains(song.id) == true }.count == 1)
+    }
+
+    @Test func songsPlayedAfterAWaitingSongWaitToKeepPlayOrder() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"])
+        harness.music.addToCatalog("Band", "D")
+        harness.music.setReachesMusicApp("D", false)
+        harness.clock.advance(hours: 0.25)
+        harness.play("Band", "D", minutesAgo: 5)
+        harness.play("Band", "A")
+        let (_, waiting) = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["A", "B", "C"])
+        #expect(waiting.playlists["Radio"]?.waiting == 2)
+
+        harness.music.setReachesMusicApp("D", true)
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["B", "C", "D", "A"])
+    }
+
+    @Test func aSongThatNeverReachesMusicStopsHoldingOthersBackAfterAnHour() async throws {
+        let harness = try await harnessWithSongs(["A", "B"])
+        harness.music.addToCatalog("Band", "C")
+        harness.music.setReachesMusicApp("C", false)
+        harness.clock.advance(hours: 0.25)
+        harness.play("Band", "C", minutesAgo: 5)
         harness.play("Band", "A")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists()["Radio"] == ["A", "B", "C"])
-
-        harness.music.setSyncedToMusicApp("A", true)
-        harness.clock.advance(hours: 0.25)
-        _ = try await harness.radio.run()
-        #expect(harness.music.playlists()["Radio"] == ["B", "C", "A"])
+        harness.clock.advance(hours: 1)
+        let (_, sync) = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["B", "A"])
+        let changes = try #require(sync.playlists["Radio"])
+        #expect((changes.added, changes.moved, changes.waiting) == (0, 1, 1))
     }
 
     @Test func aSongRemovedByHandReturnsWhenItPlaysAgain() async throws {
@@ -198,18 +254,18 @@ import Testing
         #expect(harness.music.playlists()["Radio"] == ["B", "C", "A"])
     }
 
-    @Test func aPlaylistMusicCannotSeeYetIsRetried() async throws {
-        let harness = try await harnessWithSongs(["A"])
-        harness.music.renamePlaylist("Radio", to: "Hidden")
-        harness.clock.advance(hours: 0.25)
+    @Test func anotherPlaylistWithTheSameNameIsReportedRatherThanGuessed() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Band", "A")
+        _ = harness.music.seedPlaylist(name: "Radio", songIDs: [])
+        _ = harness.music.seedPlaylist(name: "Radio", songIDs: [])
         harness.play("Band", "A")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists()["Hidden"] == ["A"])
 
-        harness.music.renamePlaylist("Hidden", to: "Radio")
-        harness.clock.advance(hours: 0.25)
-        _ = try await harness.radio.run()
-        #expect(harness.music.playlists()["Radio"] == ["A"])
+        #expect(harness.music.playlistNames() == ["Radio", "Radio"])
+        #expect(try await harness.radio.status().musicAppError?.contains("more than one playlist named \"Radio\"") == true)
     }
 
     /// Databases from earlier releases (schema 1, and schema 2 on the Mac
@@ -262,7 +318,6 @@ import Testing
             "Radio Archive": ["Dog Days Are Over", "Numb", "Savior"],
         ])
         #expect(try await upgraded.status().playlistCount == 3)
-        #expect(harness.musicApp.calls == 0)
     }
 
     /// The Mac mini's database since 2026-10-13 (schema 3) already has a
@@ -306,6 +361,55 @@ import Testing
         #expect(try await upgraded.status().stations.first?.recentlyAdded.map(\.title) == ["Numb", "Savior"])
     }
 
+    /// The Mac mini's database on 2026-10-13 (schema 4) listed songs that
+    /// Music.app had wiped out of both playlists. Placing every entry again
+    /// restores them, in play order.
+    @Test func upgradingRestoresSongsMusicWipedOut() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        let songs = ["A", "B", "C", "D"].map { harness.music.addToCatalog("Band", $0) }
+        let (a, b, d) = (songs[0].id, songs[1].id, songs[3].id)
+        let radioID = harness.music.seedPlaylist(name: "Radio", songIDs: [b, a, d])
+        let archiveID = harness.music.seedPlaylist(name: "Radio Archive", songIDs: [a, d])
+        let now = harness.clock.now
+        func at(_ minutes: Double) -> String { now.addingTimeInterval(-minutes * 60).formatted(.iso8601) }
+        let home = RadioHome(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("radio-tests-\(UUID().uuidString)"))
+        var statements = [
+            "INSERT INTO stations VALUES (1, 'alt1021rva', 'audacy', '101-1041', 'Alt 102.1', '\(at(90))', '\(at(1))', NULL, NULL, NULL)",
+            "INSERT INTO playlists VALUES ('recent', '\(radioID)', 'M-\(radioID)')",
+            "INSERT INTO playlists VALUES ('archive', '\(archiveID)', 'M-\(archiveID)')",
+        ]
+        for (index, song) in songs.enumerated() {
+            let played = at(Double(40 - index * 10))
+            statements += [
+                "INSERT INTO songs VALUES (\(index + 1), 'band|\(song.name.lowercased())', 'Band', '\(song.name)', 'matched', '\(song.id)', '\(song.url)', 'auto', '[]', '\(played)', NULL, '\(played)', '\(song.name)', 'Band', 'Album')",
+                "INSERT INTO plays VALUES (1, '\(index + 1)', '\(played)', 'Band', '\(song.name)', \(index + 1))",
+                "INSERT INTO playlist_tracks VALUES ('recent', '\(song.id)', \(index + 1), 1, '\(played)', '\(played)')",
+                "INSERT INTO playlist_tracks VALUES ('archive', '\(song.id)', \(index + 1), 1, '\(played)', '\(played)')",
+            ]
+        }
+        try writeSchemaFourDatabase(at: home, statements: statements)
+        for file in try FileManager.default.contentsOfDirectory(atPath: harness.home.directory.path)
+        where file.hasSuffix(".json") || file.hasSuffix(".p8") {
+            try FileManager.default.copyItem(at: harness.home.directory.appendingPathComponent(file),
+                                             to: home.directory.appendingPathComponent(file))
+        }
+        let clock = harness.clock
+        let upgraded = try Radio(
+            home: home, http: harness.http, sources: [AudacySource(http: harness.http)],
+            notifier: PushoverNotifier(http: harness.http, userKey: nil, apiKey: nil),
+            musicApp: harness.musicApp, now: { clock.now }
+        )
+
+        _ = try await upgraded.sync()
+
+        #expect(harness.music.playlistNames() == ["Radio", "Radio Archive"])
+        #expect(harness.music.playlists() == ["Radio": ["A", "B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"]])
+        let status = try await upgraded.status()
+        #expect((status.playlistCount, status.archiveCount) == (4, 4))
+    }
+
     /// The tables exactly as the first release (commit 4580917) created them.
     func writeSchemaOneDatabase(at home: RadioHome, statements: [String]) throws {
         try FileManager.default.createDirectory(at: home.directory, withIntermediateDirectories: true)
@@ -339,6 +443,49 @@ import Testing
             """,
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
             "PRAGMA user_version = 1",
+        ]
+        for statement in schema + statements {
+            #expect(sqlite3_exec(db, statement, nil, nil, nil) == SQLITE_OK, "\(statement)")
+        }
+    }
+
+    /// The tables exactly as schema 4 (commit f153939) left them.
+    func writeSchemaFourDatabase(at home: RadioHome, statements: [String]) throws {
+        try FileManager.default.createDirectory(at: home.directory, withIntermediateDirectories: true)
+        var db: OpaquePointer?
+        #expect(sqlite3_open(home.directory.appendingPathComponent("radio.sqlite").path, &db) == SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let schema = [
+            """
+            CREATE TABLE stations (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, source TEXT NOT NULL,
+                feed_id TEXT NOT NULL, name TEXT NOT NULL, added_at TEXT NOT NULL, last_poll_ok_at TEXT,
+                poll_failing_since TEXT, last_poll_error TEXT, feed_alert_sent_at TEXT)
+            """,
+            """
+            CREATE TABLE songs (id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, artist TEXT NOT NULL,
+                title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'matched', 'unmatched', 'ignored')),
+                catalog_id TEXT, catalog_url TEXT, matched_by TEXT, candidates TEXT,
+                first_heard_at TEXT NOT NULL, held_at TEXT, resolved_at TEXT,
+                catalog_name TEXT, catalog_artist TEXT, catalog_album TEXT)
+            """,
+            """
+            CREATE TABLE plays (station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+                play_id TEXT NOT NULL, played_at TEXT NOT NULL, artist TEXT NOT NULL, title TEXT NOT NULL,
+                song_id INTEGER NOT NULL REFERENCES songs(id), PRIMARY KEY (station_id, play_id))
+            """,
+            "CREATE INDEX plays_by_time ON plays (station_id, played_at)",
+            "CREATE INDEX plays_by_song ON plays (song_id)",
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            "CREATE TABLE playlists (kind TEXT PRIMARY KEY, library_id TEXT, music_id TEXT)",
+            """
+            CREATE TABLE playlist_tracks (playlist TEXT NOT NULL REFERENCES playlists(kind),
+                catalog_id TEXT NOT NULL, song_id INTEGER NOT NULL REFERENCES songs(id),
+                station_id INTEGER REFERENCES stations(id) ON DELETE SET NULL, added_at TEXT NOT NULL,
+                position_played_at TEXT, PRIMARY KEY (playlist, catalog_id))
+            """,
+            "CREATE INDEX playlist_tracks_by_station ON playlist_tracks (playlist, station_id, added_at)",
+            "PRAGMA user_version = 4",
         ]
         for statement in schema + statements {
             #expect(sqlite3_exec(db, statement, nil, nil, nil) == SQLITE_OK, "\(statement)")
