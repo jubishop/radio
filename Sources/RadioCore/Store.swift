@@ -67,6 +67,29 @@ struct TrackToDrop {
     var song: MusicAppSong?
 }
 
+/// A song in one of Radio's playlists, with the stations that played it.
+struct PlaylistEntry {
+    var catalogID: String
+    var artist: String
+    var title: String
+    var url: String?
+    /// Every station that played the song, most recently first.
+    var stations: [StationPlays]
+    /// Nil for a match saved before Radio stored catalog titles.
+    var song: MusicAppSong?
+    /// The comment Radio last gave the song in Music.app.
+    var comment: String?
+
+    var latestPlay: Date? { stations.first?.latestPlay }
+}
+
+/// One station's plays of a song.
+struct StationPlays {
+    var name: String
+    var plays: Int
+    var latestPlay: Date
+}
+
 /// A play as the dashboard shows it, with where its song stands.
 public struct PlayEntry: Equatable, Sendable {
     public enum State: String, Sendable { case added, waiting, held, ignored }
@@ -105,7 +128,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 5
+    private static let schemaVersion: Int64 = 6
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -118,6 +141,7 @@ final class Store {
             if version < 3 { try migrateToSchemaThree() }
             if version < 4 { try migrateToSchemaFour() }
             if version < 5 { try migrateToSchemaFive() }
+            if version < 6 { try migrateToSchemaSix() }
         }
     }
 
@@ -266,6 +290,13 @@ final class Store {
         try db.execute("CREATE TABLE library_requests (catalog_id TEXT PRIMARY KEY, requested_at TEXT NOT NULL)")
         try db.execute("UPDATE playlist_tracks SET position_played_at = NULL")
         try db.execute("PRAGMA user_version = 5")
+    }
+
+    /// Remembers the comment Radio last gave each song in Music.app, so it
+    /// writes one only when the song's plays change it.
+    private func migrateToSchemaSix() throws {
+        try db.execute("CREATE TABLE music_comments (catalog_id TEXT PRIMARY KEY, text TEXT NOT NULL)")
+        try db.execute("PRAGMA user_version = 6")
     }
 
     // MARK: Stations
@@ -637,6 +668,52 @@ final class Store {
     func removePlaylistTrack(from kind: Playlist.Kind, catalogID: String) throws {
         try db.execute("DELETE FROM playlist_tracks WHERE playlist = ? AND catalog_id = ?",
                        [.text(kind.rawValue), .text(catalogID)])
+    }
+
+    /// A playlist's entries in playlist order, with each station's plays of
+    /// every song matched to the entry's catalog song.
+    func playlistEntries(_ kind: Playlist.Kind) throws -> [PlaylistEntry] {
+        var stations: [String: [StationPlays]] = [:]
+        for row in try db.query(
+            """
+            SELECT s.catalog_id, st.name, COUNT(*) AS play_count, MAX(p.played_at) AS latest_played
+            FROM playlist_tracks t
+            JOIN songs s ON s.catalog_id = t.catalog_id AND s.status = 'matched'
+            JOIN plays p ON p.song_id = s.id JOIN stations st ON st.id = p.station_id
+            WHERE t.playlist = ?
+            GROUP BY s.catalog_id, st.id ORDER BY latest_played DESC, st.name
+            """,
+            [.text(kind.rawValue)]
+        ) {
+            stations[row.string("catalog_id")!, default: []].append(StationPlays(
+                name: row.string("name")!, plays: Int(row.int("play_count")!),
+                latestPlay: parseISODate(row.string("latest_played")!)!
+            ))
+        }
+        return try db.query(
+            """
+            SELECT t.catalog_id, s.artist, s.title, s.catalog_name, s.catalog_artist, s.catalog_album, s.catalog_url,
+                c.text AS comment
+            FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
+            LEFT JOIN music_comments c ON c.catalog_id = t.catalog_id
+            WHERE t.playlist = ? ORDER BY t.position_played_at, t.rowid
+            """,
+            [.text(kind.rawValue)]
+        ).map { row in
+            let catalogID = row.string("catalog_id")!
+            return PlaylistEntry(
+                catalogID: catalogID, artist: row.string("catalog_artist") ?? row.string("artist")!,
+                title: row.string("catalog_name") ?? row.string("title")!, url: row.string("catalog_url"),
+                stations: stations[catalogID] ?? [], song: Self.musicAppSong(row), comment: row.string("comment")
+            )
+        }
+    }
+
+    func recordComment(_ text: String, catalogID: String) throws {
+        try db.execute(
+            "INSERT INTO music_comments (catalog_id, text) VALUES (?, ?) ON CONFLICT (catalog_id) DO UPDATE SET text = excluded.text",
+            [.text(catalogID), .text(text)]
+        )
     }
 
     func playlistCount(_ kind: Playlist.Kind) throws -> Int {

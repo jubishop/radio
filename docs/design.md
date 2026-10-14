@@ -43,6 +43,14 @@ open. Feed details are in
   and "Radio Archive" held 94 of 166. Syncs that edited a playlist through
   Music.app lost nearly every song the API added in that sync, and syncs
   that didn't use Music.app lost none.
+- **Music's playlists can't show more columns.** In Music 1.7 on macOS
+  27.0.1, a playlist has no column options, and its View menu offers only a
+  fixed "Sort By" list without comments. The Songs view has column options,
+  including Comments. The user reported this on 2026-10-13. A comment
+  belongs to the library track, so it shows wherever the song does, and
+  changing it edits no playlist. On 2026-10-13, Music.app's scripting set the
+  comment of an Apple Music track in "Radio", and the comment was still there
+  three minutes later. None of the library's 3,846 tracks had a comment.
 
 ## Decisions
 
@@ -349,6 +357,34 @@ It also
 shows the review queue and health: last poll, last sync, and Apple Music
 sign-in status. The page refreshes itself. Public hosting was deferred
 because it would add a service to deploy, secure, and keep in sync.
+
+### Show each song's stations and latest play
+
+Accepted 2026-10-13. The user asked for each song's stations and latest play
+in its Music comment, and for a way to see them without opening Get Info on
+each song. Music's playlists [can't show comments](#constraints), so the user
+accepted both recommendations:
+
+- **Comments:** each sync gives every song in the playlists a comment such
+  as `📻 2026-10-13 15:14 · Alt 102.1, 107.7 The End`. It has the song's
+  latest play on any station, in the Mac's time zone, then every station
+  that played it, most recently first. The time comes first, to the minute
+  in 24-hour form, so sorting the Songs view by Comments puts Radio's songs
+  in play order. Radio replaces only empty comments and its own, which start
+  with 📻, so a comment someone writes stays. It remembers the comment it
+  last gave each song and asks Music.app only when the song's plays change
+  it. Songs already in the playlists get comments on the first sync after
+  the upgrade.
+- **Dashboard pages:** `/playlists/radio` and `/playlists/archive` list each
+  playlist's songs, most recently played first, with each station's play
+  count. The dashboard's playlist counts link to them.
+
+The tradeoffs:
+
+- Each new or re-played song costs one more Music.app call per sync.
+- A song dropped from both playlists keeps its last comment.
+- Music.app finds the song's track the way placing does, so a comment can
+  land on another version with the same title and artist.
 
 ### Send a weekly Pushover nudge about held-back songs
 

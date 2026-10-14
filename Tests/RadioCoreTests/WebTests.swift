@@ -31,7 +31,38 @@ import Testing
         #expect(page.contains("Apple Music connected"))
         #expect(page.contains("1 song to review"))
         #expect(page.contains("in playlist"))
-        #expect(page.contains("1 song in Radio, 1 in Radio Archive"))
+        #expect(page.contains(#"<a href="/playlists/radio">1 song in Radio</a>, <a href="/playlists/archive">1 in Radio Archive</a>"#))
+    }
+
+    @Test func eachPlaylistsPageListsItsSongsWithTheStationsThatPlayedThem() async throws {
+        let harness = try Harness(playlistLimit: 1)
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        _ = try await harness.radio.addStation(slug: "rock")
+        let savior = harness.music.addToCatalog("Rise Against", "Savior")
+        harness.music.addToCatalog("Tom & Jerry", "<Hit>")
+        harness.play("Rise Against", "Savior", minutesAgo: 40)
+        harness.play("Rise Against", "Savior", minutesAgo: 30)
+        harness.play("Rise Against", "Savior", on: "101-2000", minutesAgo: 20)
+        harness.play("Tom & Jerry", "<Hit>", minutesAgo: 10)
+        _ = try await harness.radio.run()
+        let dashboard = Dashboard(radio: harness.radio)
+
+        let radio = text(await dashboard.handle(request("GET", "/playlists/radio")))
+        let archive = text(await dashboard.handle(request("GET", "/playlists/archive")))
+        let missing = await dashboard.handle(request("GET", "/playlists/other"))
+
+        #expect(radio.contains("<h1>Radio</h1>"))
+        #expect(radio.contains("Tom &amp; Jerry – &lt;Hit&gt;"))
+        #expect(!radio.contains("Savior"))
+        #expect(archive.contains("<h1>Radio Archive</h1>"))
+        // Most recently played first, with every station that played each
+        // song, most recent first.
+        let hit = try #require(archive.range(of: "Tom &amp; Jerry – &lt;Hit&gt;"))
+        let saviorLink = try #require(archive.range(of: #"<a href="\#(savior.url)" target="_blank" rel="noopener">Rise Against – Savior</a>"#))
+        #expect(hit.lowerBound < saviorLink.lowerBound)
+        #expect(archive.contains("Rock 99, Alt 102.1 ×2"))
+        #expect(missing.status == 404)
     }
 
     @Test func theReviewPageMatchesAndIgnoresSongs() async throws {

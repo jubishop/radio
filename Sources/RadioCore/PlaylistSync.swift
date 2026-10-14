@@ -126,11 +126,54 @@ extension Radio {
                 // An entry whose track will apparently never reach the
                 // library stays where it is.
                 if track.inPlaylist { try store.setPosition(in: kind, catalogID: track.catalogID, playedAt: track.latestPlay) }
-            case .trackNotFound, .playlistNotFound, .ambiguousPlaylist:
+            case .trackNotFound, .commented, .playlistNotFound, .ambiguousPlaylist:
                 return changes
             }
         }
         return changes
+    }
+
+    /// Starts every comment Radio writes, so it replaces only its own.
+    static let commentMark = "📻"
+
+    /// Such as "📻 2026-10-13 15:14 · Alt 102.1, 107.7 The End": the song's
+    /// latest play in the Mac's time zone, which sorts the Comments column
+    /// in time order, then the stations that played it, most recently first.
+    static func comment(for entry: PlaylistEntry) -> String? {
+        guard let latest = entry.latestPlay else { return nil }
+        let time = latest.formatted(Date.VerbatimFormatStyle(
+            format: "\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
+            timeZone: .current, calendar: Calendar(identifier: .gregorian)
+        ))
+        return "\(commentMark) \(time) · " + entry.stations.map(\.name).joined(separator: ", ")
+    }
+
+    /// Gives each song in the playlists a Music.app comment with its latest
+    /// play and stations, when its plays have changed it, since Music.app's
+    /// playlists can't show Radio's details any other way. Returns how many
+    /// songs Music.app was asked to comment.
+    func syncComments(music: inout MusicAppSession) async throws -> Int {
+        guard musicApp != nil else { return 0 }
+        var commented = 0
+        var seen = Set<String>()
+        for kind in Playlist.Kind.allCases {
+            var playlist = try store.playlist(kind)
+            entries: for entry in try store.playlistEntries(kind) where seen.insert(entry.catalogID).inserted {
+                guard let song = entry.song, let text = Self.comment(for: entry), text != entry.comment else { continue }
+                let action = MusicAppAction.comment(text, mark: Self.commentMark)
+                guard let result = try await perform(action, song: song, playlist: &playlist, music: &music) else { break }
+                switch result {
+                case .commented:
+                    try store.recordComment(text, catalogID: entry.catalogID)
+                    commented += 1
+                case .notInLibrary, .trackNotFound, .placed, .removed:
+                    continue
+                case .playlistNotFound, .ambiguousPlaylist:
+                    break entries
+                }
+            }
+        }
+        return commented
     }
 
     /// Asks Apple to add songs to the library, where Music.app can find
@@ -156,7 +199,7 @@ extension Radio {
         case .removed, .placed, .trackNotFound, .playlistNotFound:
             try store.removePlaylistTrack(from: playlist.kind, catalogID: catalogID)
             return true
-        case .notInLibrary, .ambiguousPlaylist:
+        case .notInLibrary, .commented, .ambiguousPlaylist:
             return false
         }
     }
@@ -181,7 +224,7 @@ extension Radio {
             return nil
         }
         switch result {
-        case .placed(let id), .removed(let id), .trackNotFound(let id), .notInLibrary(let id):
+        case .placed(let id), .removed(let id), .commented(let id), .trackNotFound(let id), .notInLibrary(let id):
             music.succeeded = true
             guard playlist.musicID != id else { break }
             let replaced = playlist.musicID != nil

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Routes web requests to the dashboard, review, and sign-in pages.
+/// Routes web requests to the dashboard, playlist, review, and sign-in pages.
 public struct Dashboard: Sendable {
     let radio: Radio
 
@@ -14,6 +14,11 @@ public struct Dashboard: Sendable {
             switch (request.method, parts.count) {
             case ("GET", 0):
                 return .html(Pages.dashboard(try await radio.status(), signInURL: radio.signInURL))
+            case ("GET", 2) where parts[0] == "playlists":
+                guard let kind = Playlist.Kind.allCases.first(where: { Pages.path(of: $0) == request.path }) else {
+                    return .html(Pages.notFound(), status: 404)
+                }
+                return .html(Pages.playlist(name: await radio.name(of: kind), entries: try await radio.playlistEntries(kind)))
             case ("GET", 1) where parts[0] == "review":
                 return .html(Pages.review(try await radio.heldSongs(), message: request.query["message"]))
             case ("POST", 3) where parts[0] == "review":

@@ -32,6 +32,9 @@ public struct SyncReport: Sendable {
     /// Songs whose earlier automatic match the current rules reject, removed
     /// from the playlists to be matched again.
     public var replaced = 0
+    /// Songs Music.app was asked to comment with their latest play and
+    /// stations. A comment someone else wrote stays.
+    public var commented = 0
     public var error: String?
 }
 
@@ -260,6 +263,7 @@ public actor Radio {
                 }
             }
             report.playlists = try await syncPlaylists(client: client, music: &music)
+            report.commented = try await syncComments(music: &music)
             try store.setMetaDate("auth.rejected_at", nil)
             try store.setMetaDate("auth.alert_sent_at", nil)
             try store.setMeta("sync.last_error", nil)
@@ -397,6 +401,11 @@ public actor Radio {
             musicAppError: try store.meta("music.last_error"),
             heldCount: try store.heldCount(since: nil)
         )
+    }
+
+    /// A playlist's songs, most recently played first.
+    func playlistEntries(_ kind: Playlist.Kind) throws -> [PlaylistEntry] {
+        try store.playlistEntries(kind).reversed().sorted { ($0.latestPlay ?? .distantPast) > ($1.latestPlay ?? .distantPast) }
     }
 
     /// Every logged play as CSV, oldest first.

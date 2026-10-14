@@ -83,6 +83,13 @@ shows "sign-in expired". Repeat step 4.
   `radio unmatched`, then `radio match 12a`, `radio match 12 <apple-music-link>`,
   or `radio ignore 12`. A weekly Pushover nudge links to the review page when
   new songs are waiting.
+- **Playlists:** <http://jubi.local:8102/playlists/radio> and
+  <http://jubi.local:8102/playlists/archive> list each playlist's songs with
+  the stations that played them. In Music, each song's comment gives its
+  latest play and stations, such as `📻 2026-10-13 15:14 · Alt 102.1`.
+  Playlists can't show comments as a column, but the Songs view can: show its
+  Comments column with View > Show View Options, and sort by it to list
+  Radio's songs in play order.
 - **Status and data:** `radio status`, and `radio export > plays.csv` for
   every logged play.
 - **More stations:** `radio station add <audacy-slug>`, where the slug is the

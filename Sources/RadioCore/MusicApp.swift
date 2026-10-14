@@ -1,11 +1,15 @@
 import Foundation
 
-public enum MusicAppAction: String, Sendable {
+public enum MusicAppAction: Equatable, Sendable {
     /// Puts the song at the end of the playlist: removes any entries it has
     /// there, then adds its library track. Makes the playlist if it's missing.
     case place
     /// Removes the song's entries from the playlist, keeping it in the library.
     case remove
+    /// Sets the comment of the song's track, the one in the playlist or else
+    /// the one placing would add. Keeps a comment that doesn't start with
+    /// `mark`, which someone else wrote.
+    case comment(String, mark: String)
 }
 
 /// A playlist as Music.app finds it: by persistent ID once Radio knows it,
@@ -42,6 +46,8 @@ public enum MusicAppResult: Equatable, Sendable {
     case placed(playlistID: String)
     /// Also returned when placing removed the entry but couldn't add it back.
     case removed(playlistID: String)
+    /// The track has the comment, or keeps one someone else wrote.
+    case commented(playlistID: String)
     /// The playlist has no entry with that title and artist.
     case trackNotFound(playlistID: String)
     /// The library has no track for the song, perhaps because a song added
@@ -70,14 +76,20 @@ public struct ScriptedMusicApp: MusicApp {
     }
 
     public func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult {
+        let (name, comment, mark) = switch action {
+        case .place: ("place", "", "")
+        case .remove: ("remove", "", "")
+        case .comment(let text, let mark): ("comment", text, mark)
+        }
         let output = try await runOSAScript(arguments: [
-            action.rawValue, playlist.id ?? "", playlist.name, playlist.description, song.name, song.artist, song.album,
+            name, playlist.id ?? "", playlist.name, playlist.description, song.name, song.artist, song.album, comment, mark,
         ])
         let parts = output.split(separator: " ", maxSplits: 1).map(String.init)
         let id = parts.count > 1 ? parts[1] : ""
         switch parts.first {
         case "placed": return .placed(playlistID: id)
         case "removed": return .removed(playlistID: id)
+        case "commented": return .commented(playlistID: id)
         case "no-track": return .trackNotFound(playlistID: id)
         case "not-in-library": return .notInLibrary(playlistID: id)
         case "no-playlist": return .playlistNotFound
@@ -131,10 +143,11 @@ public struct ScriptedMusicApp: MusicApp {
     /// by title and artist. Placing deletes every entry for the song's
     /// library track (by its database ID) and adds the track back, which
     /// appends it; script positions follow the playlist's view sort, so they
-    /// can't be used.
+    /// can't be used. A comment belongs to the library track, so it shows in
+    /// every playlist, and changing it doesn't edit the playlist.
     static let script = """
         on run argv
-            set {action, playlistID, playlistName, playlistDescription, songName, songArtist, songAlbum} to argv
+            set {action, playlistID, playlistName, playlistDescription, songName, songArtist, songAlbum, songComment, commentMark} to argv
             tell application "Music"
                 set found to {}
                 if playlistID is not "" then set found to (every user playlist whose persistent ID is playlistID)
@@ -142,7 +155,7 @@ public struct ScriptedMusicApp: MusicApp {
                 if (count of found) > 1 then return "ambiguous-playlist"
                 if (count of found) is 1 then
                     set target to item 1 of found
-                else if action is "remove" then
+                else if action is not "place" then
                     return "no-playlist"
                 else
                     set target to make new user playlist with properties {name:playlistName}
@@ -169,6 +182,13 @@ public struct ScriptedMusicApp: MusicApp {
                 end if
                 if (count of libraryTracks) is 0 then return "not-in-library " & targetID
                 set libraryTrack to item 1 of libraryTracks
+                if action is "comment" then
+                    set existingComment to comment of libraryTrack
+                    if existingComment is "" or existingComment starts with commentMark then
+                        set comment of libraryTrack to songComment
+                    end if
+                    return "commented " & targetID
+                end if
                 set songID to database ID of libraryTrack
                 delete (every track of target whose database ID is songID)
                 try

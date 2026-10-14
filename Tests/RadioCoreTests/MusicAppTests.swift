@@ -268,6 +268,81 @@ import Testing
         #expect(try await harness.radio.status().musicAppError?.contains("more than one playlist named \"Radio\"") == true)
     }
 
+    // MARK: Comments
+
+    /// A time as Radio's comments give it: to the minute, in the Mac's time
+    /// zone, so the Comments column sorts in time order.
+    func minute(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: date)
+    }
+
+    @Test func eachSongsCommentGivesItsLatestPlayAndItsStations() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        _ = try await harness.radio.addStation(slug: "rock")
+        harness.music.addToCatalog("Band", "A")
+        harness.music.addToCatalog("Band", "B")
+        harness.play("Band", "A", minutesAgo: 30)
+        harness.play("Band", "A", on: "101-2000", minutesAgo: 20)
+        harness.play("Band", "B", minutesAgo: 10)
+        _ = try await harness.radio.run()
+
+        let now = harness.clock.now
+        #expect(harness.music.comment(of: "A") == "📻 \(minute(now - 20 * 60)) · Rock 99, Alt 102.1")
+        #expect(harness.music.comment(of: "B") == "📻 \(minute(now - 10 * 60)) · Alt 102.1")
+    }
+
+    @Test func aReplayUpdatesTheComment() async throws {
+        let harness = try await harnessWithSongs(["A", "B"])
+        _ = try await harness.radio.addStation(slug: "rock")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "A", on: "101-2000")
+        let (_, sync) = try await harness.radio.run()
+
+        #expect(harness.music.comment(of: "A") == "📻 \(minute(harness.clock.now)) · Rock 99, Alt 102.1")
+        #expect(sync.commented == 1)
+    }
+
+    @Test func aCommentSomeoneElseWroteIsKept() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Band", "A")
+        harness.music.addToCatalog("Band", "B")
+        harness.music.writeCommentByHand("Saw them live", on: "A")
+        harness.play("Band", "A", minutesAgo: 2)
+        harness.play("Band", "B", minutesAgo: 1)
+        _ = try await harness.radio.run()
+        harness.music.writeCommentByHand("Great bridge", on: "B")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "A")
+        harness.play("Band", "B")
+        _ = try await harness.radio.run()
+
+        #expect(harness.music.comment(of: "A") == "Saw them live")
+        #expect(harness.music.comment(of: "B") == "Great bridge")
+    }
+
+    @Test func commentsMusicCouldNotWriteAreWrittenOnceItWorksAgain() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Band", "A")
+        harness.play("Band", "A")
+        harness.musicApp.fail(with: "Radio isn't allowed to control Music")
+        _ = try await harness.radio.run()
+        #expect(harness.music.comment(of: "A") == nil)
+
+        harness.musicApp.fail(with: nil)
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        #expect(harness.music.comment(of: "A") == "📻 \(minute(harness.clock.now - 15 * 60)) · Alt 102.1")
+    }
+
     /// Databases from earlier releases (schema 1, and schema 2 on the Mac
     /// mini since 2026-10-13) gave each station its own playlist. The first
     /// release also accepted DJ mixes that the matcher now rejects.
@@ -408,6 +483,63 @@ import Testing
         #expect(harness.music.playlists() == ["Radio": ["A", "B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"]])
         let status = try await upgraded.status()
         #expect((status.playlistCount, status.archiveCount) == (4, 4))
+    }
+
+    /// The Mac mini's database on 2026-10-13 (schema 5) had songs in both
+    /// playlists and no comments. They get comments without moving.
+    @Test func upgradingCommentsTheSongsAlreadyInThePlaylists() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        let songs = ["A", "B"].map { harness.music.addToCatalog("Band", $0) }
+        let ids = songs.map(\.id)
+        let radioID = harness.music.seedPlaylist(name: "Radio", songIDs: ids)
+        let archiveID = harness.music.seedPlaylist(name: "Radio Archive", songIDs: ids)
+        let now = harness.clock.now
+        func at(_ minutes: Double) -> String { now.addingTimeInterval(-minutes * 60).formatted(.iso8601) }
+        let home = RadioHome(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("radio-tests-\(UUID().uuidString)"))
+        var statements = [
+            "INSERT INTO stations VALUES (1, 'alt1021rva', 'audacy', '101-1041', 'Alt 102.1', '\(at(90))', '\(at(1))', NULL, NULL, NULL)",
+            "INSERT INTO playlists VALUES ('recent', NULL, 'M-\(radioID)')",
+            "INSERT INTO playlists VALUES ('archive', NULL, 'M-\(archiveID)')",
+        ]
+        for (index, song) in songs.enumerated() {
+            let played = at(Double(20 - index * 10))
+            statements += [
+                "INSERT INTO songs VALUES (\(index + 1), 'band|\(song.name.lowercased())', 'Band', '\(song.name)', 'matched', '\(song.id)', '\(song.url)', 'auto', '[]', '\(played)', NULL, '\(played)', '\(song.name)', 'Band', 'Album')",
+                "INSERT INTO plays VALUES (1, '\(index + 1)', '\(played)', 'Band', '\(song.name)', \(index + 1))",
+                "INSERT INTO playlist_tracks VALUES ('recent', '\(song.id)', \(index + 1), 1, '\(played)', '\(played)')",
+                "INSERT INTO playlist_tracks VALUES ('archive', '\(song.id)', \(index + 1), 1, '\(played)', '\(played)')",
+            ]
+        }
+        // Schema 5 (commit 3820d9c) is schema 4 without the web API's
+        // playlist IDs, plus library requests.
+        statements += [
+            "ALTER TABLE playlists DROP COLUMN library_id",
+            "CREATE TABLE library_requests (catalog_id TEXT PRIMARY KEY, requested_at TEXT NOT NULL)",
+            "PRAGMA user_version = 5",
+        ]
+        try writeSchemaFourDatabase(at: home, statements: statements)
+        for file in try FileManager.default.contentsOfDirectory(atPath: harness.home.directory.path)
+        where file.hasSuffix(".json") || file.hasSuffix(".p8") {
+            try FileManager.default.copyItem(at: harness.home.directory.appendingPathComponent(file),
+                                             to: home.directory.appendingPathComponent(file))
+        }
+        let clock = harness.clock
+        let upgraded = try Radio(
+            home: home, http: harness.http, sources: [AudacySource(http: harness.http)],
+            notifier: PushoverNotifier(http: harness.http, userKey: nil, apiKey: nil),
+            musicApp: harness.musicApp, now: { clock.now }
+        )
+
+        let sync = try await upgraded.sync()
+
+        #expect(harness.music.comment(of: "A") == "📻 \(minute(now - 20 * 60)) · Alt 102.1")
+        #expect(harness.music.comment(of: "B") == "📻 \(minute(now - 10 * 60)) · Alt 102.1")
+        #expect(harness.music.playlists() == ["Radio": ["A", "B"], "Radio Archive": ["A", "B"]])
+        let changes = try #require(sync.playlists["Radio"])
+        #expect((changes.added, changes.moved, changes.dropped) == (0, 0, 0))
+        #expect(sync.commented == 2)
     }
 
     /// The tables exactly as the first release (commit 4580917) created them.

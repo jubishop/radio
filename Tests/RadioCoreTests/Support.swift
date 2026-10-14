@@ -142,6 +142,8 @@ final class FakeAppleMusic: Sendable {
         /// Catalog songs that don't reach Music.app.
         var withheld: Set<String> = []
         var playlistsCreated = 0
+        /// Music.app's comments, by catalog song.
+        var comments: [String: String] = [:]
     }
     private let catalog = Mutex<[CatalogSong]>([])
     private let state = Mutex(State())
@@ -282,6 +284,18 @@ final class FakeAppleMusic: Sendable {
         editByHand { $0.playlists = [:] }
     }
 
+    /// A song's comment in Music.app.
+    func comment(of title: String) -> String? {
+        let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
+        return state.withLock { state in ids.compactMap { state.comments[$0] }.first }
+    }
+
+    /// Writes a song's comment the way a person would in Get Info.
+    func writeCommentByHand(_ text: String, on title: String) {
+        let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
+        state.withLock { state in for id in ids { state.comments[id] = text } }
+    }
+
     /// A person's edit, which reaches both copies.
     private func editByHand(_ edit: (inout Library) -> Void) {
         state.withLock { state in
@@ -303,7 +317,7 @@ final class FakeAppleMusic: Sendable {
             let id: String
             if let existing = found.first {
                 id = existing.key
-            } else if action == .remove {
+            } else if action != .place {
                 return .playlistNotFound
             } else {
                 state.playlistsCreated += 1
@@ -315,16 +329,22 @@ final class FakeAppleMusic: Sendable {
             let ids = Set(matching.map(\.id))
             let entry = state.mac.playlists[id]!.songIDs.first(where: ids.contains)
             let library = matching.filter { state.mac.songIDs.contains($0.id) }
+            let track = entry ?? (library.first { $0.albumName == song.album } ?? library.first)?.id
             switch action {
             case .remove:
                 guard let entry else { return .trackNotFound(playlistID: musicID) }
                 state.mac.playlists[id]!.songIDs.removeAll { $0 == entry }
             case .place:
-                guard let track = entry ?? (library.first { $0.albumName == song.album } ?? library.first)?.id,
-                      state.mac.songIDs.contains(track)
-                else { return .notInLibrary(playlistID: musicID) }
+                guard let track, state.mac.songIDs.contains(track) else { return .notInLibrary(playlistID: musicID) }
                 state.mac.playlists[id]!.songIDs.removeAll { $0 == track }
                 state.mac.playlists[id]!.songIDs.append(track)
+            case .comment(let text, let mark):
+                // A track's details aren't part of the playlist, so this
+                // isn't an edit that uploads it.
+                guard let track, state.mac.songIDs.contains(track) else { return .notInLibrary(playlistID: musicID) }
+                let current = state.comments[track] ?? ""
+                if current.isEmpty || current.hasPrefix(mark) { state.comments[track] = text }
+                return .commented(playlistID: musicID)
             }
             state.edited.insert(id)
             return action == .remove ? .removed(playlistID: musicID) : .placed(playlistID: musicID)

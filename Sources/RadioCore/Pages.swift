@@ -43,7 +43,39 @@ enum Pages {
 
     private static func playlists(_ status: RadioStatus) -> String {
         let songs = "\(status.playlistCount) song\(status.playlistCount == 1 ? "" : "s")"
-        return "\(songs) in \(escape(Radio.playlistName)), \(status.archiveCount) in \(escape(Radio.archivePlaylistName))"
+        return "<a href=\"\(path(of: .recent))\">\(songs) in \(escape(Radio.playlistName))</a>, "
+            + "<a href=\"\(path(of: .archive))\">\(status.archiveCount) in \(escape(Radio.archivePlaylistName))</a>"
+    }
+
+    /// Where the dashboard lists a playlist's songs.
+    static func path(of kind: Playlist.Kind) -> String {
+        switch kind {
+        case .recent: "/playlists/radio"
+        case .archive: "/playlists/archive"
+        }
+    }
+
+    /// A playlist's songs, most recently played first, with the stations
+    /// that played each one and how often.
+    static func playlist(name: String, entries: [PlaylistEntry]) -> String {
+        let count = "\(entries.count) song\(entries.count == 1 ? "" : "s")"
+        var body = """
+            <header><p><a href="/">← Radio</a></p><h1>\(escape(name))</h1>
+            <p class="meta">\(count), most recently played first. Each song's comment in Music gives its latest play and stations.</p></header>
+            <section>
+            """
+        if entries.isEmpty {
+            body += "<p class=\"empty\">No songs yet.</p>"
+        } else {
+            body += "<ol>"
+            for entry in entries {
+                let time = entry.latestPlay.map { "<time>\(escape(shortTime($0)))</time> " } ?? ""
+                let stations = entry.stations.map { $0.plays > 1 ? "\($0.name) ×\($0.plays)" : $0.name }.joined(separator: ", ")
+                body += "<li>\(time)\(link(entry.url, "\(entry.artist) – \(entry.title)")) <span class=\"meta\">\(escape(stations))</span></li>"
+            }
+            body += "</ol>"
+        }
+        return page(title: "\(name) · Radio", body: body + "</section>", refresh: false)
     }
 
     private static func review(count: Int) -> String {

@@ -83,7 +83,8 @@ func printSync(_ report: SyncReport) {
     }
     log("Sync: \(report.matched) matched, \(report.held) held for review"
         + changes.map { "; \($0)" }.joined()
-        + (report.replaced == 0 ? "" : "; replaced \(report.replaced) rejected matches"))
+        + (report.replaced == 0 ? "" : "; replaced \(report.replaced) rejected matches")
+        + (report.commented == 0 ? "" : "; commented \(report.commented) song\(report.commented == 1 ? "" : "s")"))
     if let error = report.error { log("Sync failed: \(error)") }
 }
 
