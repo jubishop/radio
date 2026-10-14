@@ -116,8 +116,9 @@ Radio reads `PUSHOVER_USER_KEY` and `PUSHOVER_API_KEY` from `~/.env`. It sends:
 
 - one alert when a station's feed has failed for two hours, because the feed
   keeps only about four hours of plays;
-- one alert when Apple Music has rejected the sign-in for an hour. Brief 401s
-  happen, especially in the first minutes after a new MusicKit key is created;
+- one alert when Apple Music has rejected the sign-in for an hour. Apple's 401
+  and 403 responses both count as a rejection. Brief 401s happen, especially in
+  the first minutes after a new MusicKit key is created;
 - a weekly nudge when songs were held back for review that week.
 
 ## Stop or remove
