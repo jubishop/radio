@@ -55,7 +55,17 @@ $schedule
 PLIST
   plutil -lint -s "$agents/$label.plist"
   launchctl bootout "$domain/$label" 2>/dev/null || true
-  launchctl bootstrap "$domain" "$agents/$label.plist"
+  # bootout can return before launchd has removed the old job, and bootstrap
+  # then fails with "5: Input/output error" (seen 2026-10-13), so retry.
+  tries=1
+  until launchctl bootstrap "$domain" "$agents/$label.plist" 2>/dev/null; do
+    if [ "$tries" -ge 10 ]; then
+      launchctl bootstrap "$domain" "$agents/$label.plist"
+      return
+    fi
+    tries=$((tries + 1))
+    sleep 1
+  done
 }
 
 write_agent com.jubishop.radio.run "  <key>StartInterval</key>
