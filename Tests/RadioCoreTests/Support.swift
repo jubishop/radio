@@ -86,6 +86,39 @@ final class FakeAudacy: Sendable {
     }
 }
 
+/// iHeartRadio's station sites, station API, and track history.
+final class FakeIHeart: Sendable {
+    private let plays = Mutex<[String: [(time: Date, artist: String, title: String)]]>([:])
+
+    init(http: FakeHTTP) {
+        http.on("GET https://hits1061seattle.iheart.com/") { _ in
+            let html = #"<html><body><script>window.__PRELOADED_STATE__ = {"tags":["stream:4257"],"#
+                + #""stream":{"id":4257,"primaryPronouncement":"hits one oh six point one"}};</script></body></html>"#
+            return HTTPResponse(status: 200, body: Data(html.utf8))
+        }
+        http.on("GET https://us.api.iheart.com/api/v2/content/liveStations/") { request in
+            guard request.url.lastPathComponent == "4257" else {
+                return json(["error": ["description": "Not found", "code": 5, "httpCode": 404]], status: 404)
+            }
+            return json(["hits": [["id": 4257, "name": "Hits 106.1", "callLetters": "KBKS-FM", "freq": "106.1"]]])
+        }
+        http.on("GET https://us.api.iheart.com/api/v3/live-meta/stream/") { [self] request in
+            let streamID = request.url.pathComponents[request.url.pathComponents.count - 2]
+            let limit = Int(URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "limit" }?.value ?? "") ?? 0
+            let recent = plays.withLock { $0[streamID] ?? [] }.suffix(min(limit, 200)).reversed()
+            return json(["data": recent.map {
+                ["artist": $0.artist, "title": $0.title, "startTime": Int($0.time.timeIntervalSince1970),
+                 "endTime": Int($0.time.timeIntervalSince1970) + 180, "dataSource": "Pnp"]
+            }, "meta": ["offset": 0, "pageSize": limit, "totalSize": recent.count]])
+        }
+    }
+
+    func play(_ artist: String, _ title: String, on streamID: String = "4257", at time: Date) {
+        plays.withLock { $0[streamID, default: []].append((time, artist, title)) }
+    }
+}
+
 /// The parts of the Apple Music API Radio uses, with two copies of the
 /// library: Apple's, which the API changes, and Music.app's on the Mac. A
 /// sync uploads each playlist Music.app changed, replacing Apple's copy, and
@@ -338,6 +371,7 @@ struct Harness {
     let http: FakeHTTP
     let clock = TestClock()
     let audacy: FakeAudacy
+    let iheart: FakeIHeart
     let music: FakeAppleMusic
     let musicApp: FakeMusicApp
     let home: RadioHome
@@ -346,6 +380,7 @@ struct Harness {
     init(pushover: Bool = true, playlistLimit: Int = 100, archiveLimit: Int = 10_000, http: FakeHTTP = FakeHTTP()) throws {
         self.http = http
         audacy = FakeAudacy(http: http)
+        iheart = FakeIHeart(http: http)
         music = FakeAppleMusic(http: http)
         musicApp = FakeMusicApp(music: music)
         http.on("POST https://api.pushover.net/") { _ in json(["status": 1]) }
@@ -355,7 +390,7 @@ struct Harness {
         radio = try Radio(
             home: home,
             http: http,
-            sources: [AudacySource(http: http)],
+            sources: [AudacySource(http: http), IHeartSource(http: http)],
             notifier: PushoverNotifier(http: http, userKey: pushover ? "user" : nil, apiKey: pushover ? "app" : nil),
             musicApp: musicApp,
             playlistLimit: playlistLimit,

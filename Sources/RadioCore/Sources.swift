@@ -17,7 +17,7 @@ public struct FeedPlay: Equatable, Sendable {
 }
 
 /// Finds stations and reads their recent plays. Each radio network gets its
-/// own implementation; Audacy is the only one so far.
+/// own implementation.
 public protocol PlaySource: Sendable {
     var name: String { get }
     func lookUp(slug: String) async throws -> StationInfo
@@ -75,6 +75,71 @@ public struct AudacySource: PlaySource {
     private struct Performance: Decodable {
         let id: Int64
         let time: String
+        let artist: String?
+        let title: String?
+    }
+}
+
+/// Reads iHeartRadio station sites and their public track history. See
+/// docs/iheart-track-history.md.
+public struct IHeartSource: PlaySource {
+    public let name = "iheart"
+    let http: HTTPClient
+
+    /// The feed returns up to 200 plays. 100 cover about eight hours, so a
+    /// long outage loses fewer of them.
+    static let count = 100
+
+    public init(http: HTTPClient) {
+        self.http = http
+    }
+
+    /// The slug is the station site's name, such as `hits1061seattle` for
+    /// hits1061seattle.iheart.com.
+    public func lookUp(slug: String) async throws -> StationInfo {
+        guard slug.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }), !slug.isEmpty else {
+            throw SourceError(description: "\(slug) isn't an iHeartRadio site name, such as hits1061seattle.")
+        }
+        let site = URL(string: "https://\(slug).iheart.com/")!
+        let html = String(decoding: try await http.send(HTTPRequest(url: site)).requireSuccess(for: site), as: UTF8.self)
+        guard let streamID = firstMatch(#""stream":\{"id":(\d+)"#, in: html) else {
+            throw SourceError(description: "No iHeartRadio stream ID on \(site). Check the slug.")
+        }
+        let url = URL(string: "https://us.api.iheart.com/api/v2/content/liveStations/\(streamID)")!
+        let data = try await http.send(HTTPRequest(url: url, headers: ["Accept": "application/json"])).requireSuccess(for: url)
+        let name = try JSONDecoder().decode(LiveStations.self, from: data).hits.first?.name
+        return StationInfo(slug: slug, source: self.name, feedID: streamID, name: name ?? slug)
+    }
+
+    public func recentPlays(feedID: String) async throws -> [FeedPlay] {
+        let url = URL(string: "https://us.api.iheart.com/api/v3/live-meta/stream/\(feedID)/trackHistory?limit=\(Self.count)")!
+        let data = try await http.send(HTTPRequest(url: url, headers: ["Accept": "application/json"])).requireSuccess(for: url)
+        // The feed has no play ID, and a station plays one song at a time, so
+        // the start time identifies a play.
+        return try JSONDecoder().decode(TrackHistory.self, from: data).data.map { track in
+            FeedPlay(
+                playID: String(track.startTime),
+                playedAt: Date(timeIntervalSince1970: TimeInterval(track.startTime)),
+                artist: track.artist?.trimmingCharacters(in: .whitespaces) ?? "",
+                title: track.title?.trimmingCharacters(in: .whitespaces) ?? ""
+            )
+        }
+    }
+
+    private struct LiveStations: Decodable {
+        let hits: [Station]
+
+        struct Station: Decodable {
+            let name: String?
+        }
+    }
+
+    private struct TrackHistory: Decodable {
+        let data: [Track]
+    }
+
+    private struct Track: Decodable {
+        let startTime: Int64
         let artist: String?
         let title: String?
     }

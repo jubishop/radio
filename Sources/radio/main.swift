@@ -5,8 +5,11 @@ let usage = """
     Usage: radio <command>
 
     Stations
-      station add <audacy-slug> [--name NAME]   Follow a station, e.g. alt1021rva
-      station list                              List followed stations
+      station add <slug> [--source audacy|iheart] [--name NAME]
+                              Follow a station. The slug is its audacy.com path,
+                              e.g. alt1021rva, or with --source iheart its
+                              iheart.com site name, e.g. hits1061seattle
+      station list            List followed stations
 
     Scheduled work
       run                     Poll, sync, and send alerts (launchd runs this)
@@ -51,7 +54,7 @@ func makeRadio() throws -> Radio {
     return try Radio(
         home: .standard(),
         http: http,
-        sources: [AudacySource(http: http)],
+        sources: [AudacySource(http: http), IHeartSource(http: http)],
         notifier: PushoverNotifier(http: http, envFile: envFile),
         musicApp: ScriptedMusicApp()
     )
@@ -108,8 +111,10 @@ func main(_ arguments: [String]) async throws -> Int32 {
         let radio = try makeRadio()
         switch rest.first {
         case "add":
-            guard rest.count >= 2 else { throw UsageError(description: "Usage: radio station add <audacy-slug> [--name NAME]") }
-            let station = try await radio.addStation(slug: rest[1], name: try option("--name", in: rest))
+            guard rest.count >= 2 else { throw UsageError(description: "Usage: radio station add <slug> [--source audacy|iheart] [--name NAME]") }
+            let station = try await radio.addStation(
+                slug: rest[1], source: try option("--source", in: rest) ?? "audacy", name: try option("--name", in: rest)
+            )
             print("Added \(station.name) (\(station.slug), feed \(station.feedID)). Its songs go into the \"\(Radio.playlistName)\" and \"\(Radio.archivePlaylistName)\" playlists.")
         case "list":
             for station in try await radio.stations() {

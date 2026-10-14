@@ -85,7 +85,11 @@ shows "sign-in expired". Repeat step 4.
 - **Status and data:** `radio status`, and `radio export > plays.csv` for
   every logged play.
 - **More stations:** `radio station add <audacy-slug>`, where the slug is the
-  path in the station's audacy.com URL. Its songs join the "Radio" playlist.
+  path in the station's audacy.com URL, or
+  `radio station add <site> --source iheart` for an iHeartRadio station,
+  where the site is the name before `.iheart.com` in the station's own site,
+  such as `hits1061seattle`. Its songs join the "Radio" and "Radio Archive"
+  playlists.
 
 ## Upgrade from per-station playlists
 

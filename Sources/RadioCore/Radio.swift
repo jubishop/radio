@@ -89,8 +89,8 @@ public actor Radio {
     public nonisolated let dashboardURL: String
     public nonisolated let signInURL: String
 
-    /// Alert when a feed has failed for this long. The feed keeps about four
-    /// hours of plays.
+    /// Alert when a feed has failed for this long. Audacy's feed keeps about
+    /// four hours of plays.
     static let feedAlertDelay: TimeInterval = 2 * 60 * 60
     /// Alert when Apple Music has rejected the sign-in for this long. A new
     /// MusicKit key answers 401 intermittently for minutes while it rolls out.

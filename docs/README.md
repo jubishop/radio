@@ -66,3 +66,5 @@ hand-written pages to bypass failed checks.
   reviewing songs, alerts, and removal.
 - [Audacy now-playing feed](audacy-now-playing-feed.md): the JSON endpoint
   that lists a station's recent plays, and its limits.
+- [iHeartRadio track history](iheart-track-history.md): how to find an
+  iHeartRadio station's stream ID, and the JSON feed of its recent plays.

@@ -10,16 +10,18 @@ named "Radio", and the 10,000 most recently played in "Radio Archive". This
 page records the
 accepted decisions, the constraints they rest on, and the questions still
 open. Feed details are in
-[Audacy now-playing feed](audacy-now-playing-feed.md).
+[Audacy now-playing feed](audacy-now-playing-feed.md) and
+[iHeartRadio track history](iheart-track-history.md).
 
 ## Constraints
 
 - **Runs on the user's Mac mini.** The user set this requirement on
   2026-10-13. On that date, the machine's `pmset` sleep setting was `0` (it
   never sleeps) and it had been up for 13 days.
-- **The feed keeps only the last 50 plays,** about four hours, and older plays
-  can't be fetched. If the logger stops for longer than that, those plays are
-  lost.
+- **Audacy's feed keeps only the last 50 plays,** about four hours, and
+  older plays can't be fetched. If the logger stops for longer than that,
+  those plays are lost. iHeartRadio's feed returns up to 200 plays, about 18
+  hours.
 - **Apple publishes no playlist size limit.** Apple's
   [Music guide](https://support.apple.com/guide/music/access-to-your-music-library-musa3dd5209/mac)
   caps the cloud library at 100,000 songs, not counting iTunes Store
@@ -213,8 +215,16 @@ day put every station's songs in one playlist.
   are cached across stations, so a song that two stations play is searched
   only once.
 - The Audacy feed reader sits behind a small source interface, so a station
-  from another network can get its own reader later. Only the Audacy reader is
-  built now.
+  from another network can get its own reader later. An iHeartRadio reader
+  came [next](#read-iheartradio-stations-starting-with-hits-1061).
+
+### Read iHeartRadio stations, starting with Hits 106.1
+
+Accepted 2026-10-13. The user asked to add 106.1 in Seattle. That station is
+Hits 106.1 (KBKS-FM), which iHeartMedia owns and Audacy doesn't carry, so
+Radio gained a second reader, for iHeartRadio's public
+[track history](iheart-track-history.md). An iHeartRadio station's songs go
+into the same two playlists as every other station's.
 
 ### Funnel every station into one playlist named "Radio"
 
@@ -369,7 +379,8 @@ explicitly approved them.
   executable, and Swift Testing tests. Fakes sit at the HTTP boundary, and
   tests use a real SQLite database in a temporary directory.
 - **Commands:**
-  - `radio station add <audacy-slug>` and `radio station list`
+  - `radio station add <slug> [--source audacy|iheart]` and
+    `radio station list`
   - `radio poll` and `radio sync`
   - `radio run`, which polls, syncs, and handles alerts and the weekly nudge
   - `radio serve`
@@ -378,13 +389,19 @@ explicitly approved them.
   - `radio export`
   - `radio status`
 - **Schedule:** the `run` LaunchAgent fires every 15 minutes, which leaves
-  most of the feed's four-hour window as slack. The `serve` LaunchAgent stays
+  most of Audacy's four-hour window as slack. The `serve` LaunchAgent stays
   running. Both use `launchctl bootstrap` in the `gui/<uid>` domain, and
   `bin/deploy` builds a release binary into `~/.local/bin/radio` and loads
   both agents. Logs go to `~/Library/Logs/Radio`.
 - **Data directory:** `RADIO_HOME` overrides
   `~/Library/Application Support/Radio`, so development checkouts never touch
   the live database.
+- **iHeartRadio stations:** the slug is the station's site name, such as
+  `hits1061seattle` for hits1061seattle.iheart.com, the way an Audacy slug is
+  the station's audacy.com path. The site's HTML gives the stream ID, and the
+  station API gives the name. Each poll reads the 100 latest plays, about
+  eight hours, so a long outage loses fewer. The feed has no play ID, so a
+  play's start time identifies it.
 - **Song identity:** a song is its normalized primary artist plus its title
   without parenthetical suffixes. The playlist holds an Apple Music catalog
   ID at most once.

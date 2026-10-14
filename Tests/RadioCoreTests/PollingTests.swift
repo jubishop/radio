@@ -11,6 +11,49 @@ import Testing
         #expect(station.source == "audacy")
     }
 
+    @Test func addingAnIHeartStationReadsItsStreamIDFromItsSiteAndItsNameFromTheAPI() async throws {
+        let harness = try Harness()
+        let station = try await harness.radio.addStation(slug: "hits1061seattle", source: "iheart")
+        #expect(station.feedID == "4257")
+        #expect(station.name == "Hits 106.1")
+        #expect(station.source == "iheart")
+    }
+
+    @Test func anIHeartSlugMustBeASiteName() async throws {
+        let harness = try Harness()
+        await #expect(throws: (any Error).self) { try await harness.radio.addStation(slug: "hits1061seattle.iheart.com/", source: "iheart") }
+        await #expect(throws: (any Error).self) { try await harness.radio.addStation(slug: "nosuchstation", source: "iheart") }
+        #expect(harness.http.requests("GET https://hits1061seattle.iheart.com").isEmpty)
+    }
+
+    @Test func iHeartPlaysAreLoggedOnceAcrossOverlappingPolls() async throws {
+        let harness = try Harness()
+        _ = try await harness.radio.addStation(slug: "hits1061seattle", source: "iheart")
+        let played = harness.clock.now.addingTimeInterval(-600)
+        harness.iheart.play("Olivia Dean", "Man I Need", at: played)
+
+        let first = try await harness.radio.poll()
+        harness.iheart.play("Zara Larsson", "Midnight Sun", at: harness.clock.now)
+        let second = try await harness.radio.poll()
+
+        #expect(first.map(\.newPlays) == [1])
+        #expect(second.map(\.newPlays) == [1])
+        let rows = try await harness.radio.exportCSV(stationSlug: "hits1061seattle").split(separator: "\n").dropFirst()
+            .map { $0.split(separator: ",").map(String.init) }
+        #expect(rows.map { $0[2...3].joined(separator: " – ") } == ["Olivia Dean – Man I Need", "Zara Larsson – Midnight Sun"])
+        #expect(rows.first?[1] == played.formatted(.iso8601))
+    }
+
+    @Test func pollRequestsAHundredIHeartPlays() async throws {
+        let harness = try Harness()
+        _ = try await harness.radio.addStation(slug: "hits1061seattle", source: "iheart")
+        for minute in 0..<150 {
+            harness.iheart.play("Artist \(minute)", "Song \(minute)", at: harness.clock.now.addingTimeInterval(Double(minute - 150) * 60))
+        }
+        let results = try await harness.radio.poll()
+        #expect(results.map(\.newPlays) == [100])
+    }
+
     @Test func addingAStationTwiceFails() async throws {
         let harness = try Harness()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
