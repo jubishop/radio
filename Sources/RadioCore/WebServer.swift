@@ -32,6 +32,20 @@ public struct WebRequest: Sendable {
         guard let origin = headers["origin"] else { return false }
         return origin.lowercased() != "http://\(headers["host"] ?? "")".lowercased()
     }
+
+    /// True when `Host` names this Mac as only it can be named: a `.local`
+    /// name, localhost, or an IP address. A browser sends the domain it
+    /// looked up, so a site that points its own domain at this Mac (DNS
+    /// rebinding) is refused. Clients that send no `Host` aren't browsers.
+    var isAddressedToThisMac: Bool {
+        guard var name = headers["host"]?.lowercased() else { return true }
+        if name.hasPrefix("[") {
+            name = String(name.dropFirst().prefix { $0 != "]" })
+        } else if let colon = name.lastIndex(of: ":") {
+            name = String(name[..<colon])
+        }
+        return name == "localhost" || name.hasSuffix(".local") || IPv4Address(name) != nil || IPv6Address(name) != nil
+    }
 }
 
 public struct WebResponse: Sendable {

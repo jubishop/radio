@@ -351,6 +351,13 @@ a page on any website could match or ignore songs, or post a sign-in token,
 through the browser of someone on the home network. Clients that send no
 `Origin`, such as curl, are still accepted.
 
+The same day, the user asked to close DNS rebinding as well, where a site
+points its own domain at the Mac so a browser treats the dashboard as that
+site's own. Radio now serves only requests whose `Host` is a `.local` name,
+`localhost`, or an IP address, which no outside site can claim. Any other
+name gets a 403, so reaching the dashboard by another name, such as a VPN's
+DNS name, would need a code change.
+
 The macOS application firewall was off on 2026-10-13, and port 8102 was free.
 
 ### Make the page a home-network activity dashboard

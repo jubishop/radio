@@ -4,13 +4,13 @@ import RadioCore
 import Testing
 
 @Suite struct WebTests {
-    func request(_ method: String, _ path: String, form: String = "", loopback: Bool = false) -> WebRequest {
+    func request(_ method: String, _ path: String, form: String = "", headers: [String: String] = [:], loopback: Bool = false) -> WebRequest {
         let parts = path.split(separator: "?", maxSplits: 1)
         var query: [String: String] = [:]
         if parts.count > 1 {
             for item in URLComponents(string: "?" + parts[1])?.queryItems ?? [] { query[item.name] = item.value }
         }
-        return WebRequest(method: method, path: String(parts[0]), query: query, headers: [:], body: Data(form.utf8), isLoopback: loopback)
+        return WebRequest(method: method, path: String(parts[0]), query: query, headers: headers, body: Data(form.utf8), isLoopback: loopback)
     }
 
     func text(_ response: WebResponse) -> String { String(decoding: response.body, as: UTF8.self) }
@@ -111,6 +111,26 @@ import Testing
         #expect(text(local).contains("musickit.js"))
         #expect(remoteToken.status == 403)
         #expect(try await harness.radio.appleMusicState() == .needsSignIn)
+    }
+
+    @Test func onlyThisMacsOwnNamesAreServed() async throws {
+        let harness = try Harness()
+        try await harness.radio.setCredentials(keyID: "KEY123", teamID: "TEAM456", keyPEM: P256.Signing.PrivateKey().pemRepresentation)
+        let dashboard = Dashboard(radio: harness.radio)
+        func status(_ path: String, host: String) async -> Int {
+            await dashboard.handle(request("GET", path, headers: ["host": host], loopback: true)).status
+        }
+
+        for host in ["jubi.local:8102", "Jubi.Local", "localhost:8102", "127.0.0.1:8102", "192.168.1.20:8102", "[::1]:8102"] {
+            #expect(await status("/", host: host) == 200, "\(host)")
+        }
+        #expect(await status("/auth", host: "localhost:8102") == 200)
+        // A site can point its own domain at this Mac (DNS rebinding), making
+        // the dashboard and the sign-in page's developer token its own.
+        for host in ["rebind.attacker.example:8102", "jubi.local.attacker.example", "localhost.attacker.example"] {
+            #expect(await status("/", host: host) == 403, "\(host)")
+            #expect(await status("/auth", host: host) == 403, "\(host)")
+        }
     }
 
     @Test func aTokenPostedFromThisMacSignsIn() async throws {

@@ -9,6 +9,9 @@ public struct Dashboard: Sendable {
     }
 
     public func handle(_ request: WebRequest) async -> WebResponse {
+        guard request.isAddressedToThisMac else {
+            return .text("Open Radio by this Mac's .local name, localhost, or IP address.", status: 403)
+        }
         // Otherwise a page on another site could make changes through the
         // browser of anyone on the home network.
         if request.method != "GET", request.isFromAnotherSite {
