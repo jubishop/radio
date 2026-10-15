@@ -24,6 +24,14 @@ public struct WebRequest: Sendable {
     public var form: [String: String] {
         parseQuery(String(decoding: body, as: UTF8.self))
     }
+
+    /// True when a browser sent this from a page on another site. Browsers
+    /// name the page's site in `Origin` on every POST; other clients, such
+    /// as curl, send none.
+    var isFromAnotherSite: Bool {
+        guard let origin = headers["origin"] else { return false }
+        return origin.lowercased() != "http://\(headers["host"] ?? "")".lowercased()
+    }
 }
 
 public struct WebResponse: Sendable {

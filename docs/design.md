@@ -345,6 +345,12 @@ user chose a web page over the recommended terminal-only review. Later the
 same day, the user asked to keep terminal commands as well: `radio unmatched`,
 `radio match`, and `radio ignore` do the same work as the page.
 
+On 2026-10-15, before making the repository public, the user asked the server
+to refuse a POST whose `Origin` header names another site. Without that check,
+a page on any website could match or ignore songs, or post a sign-in token,
+through the browser of someone on the home network. Clients that send no
+`Origin`, such as curl, are still accepted.
+
 The macOS application firewall was off on 2026-10-13, and port 8102 was free.
 
 ### Make the page a home-network activity dashboard

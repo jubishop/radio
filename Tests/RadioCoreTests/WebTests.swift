@@ -124,6 +124,19 @@ import Testing
         #expect(try await harness.radio.appleMusicState() == .connected(storefront: "us", signedInAt: harness.clock.now))
     }
 
+    @Test func aTokenPostedFromAnotherSiteIsRefused() async throws {
+        let harness = try Harness()
+        try await harness.radio.setCredentials(keyID: "KEY123", teamID: "TEAM456", keyPEM: P256.Signing.PrivateKey().pemRepresentation)
+        // A page from another site, open in a browser on this Mac.
+        let response = await Dashboard(radio: harness.radio).handle(WebRequest(
+            method: "POST", path: "/auth/token", query: [:],
+            headers: ["host": "localhost:8102", "origin": "http://attacker.example"],
+            body: Data(#"{"token":"user-token"}"#.utf8), isLoopback: true
+        ))
+        #expect(response.status == 403)
+        #expect(try await harness.radio.appleMusicState() == .needsSignIn)
+    }
+
     @Test func theServerAnswersOverHTTP() async throws {
         let harness = try Harness()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
@@ -138,6 +151,35 @@ import Testing
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         #expect(String(decoding: data, as: UTF8.self).contains("Alt 102.1"))
         #expect((missing as? HTTPURLResponse)?.statusCode == 404)
+    }
+
+    @Test func theServerRefusesChangesSentFromAnotherSite() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.play("Unknown Band", "Demo")
+        _ = try await harness.radio.run()
+        let song = try #require(try await harness.radio.heldSongs().first)
+        let dashboard = Dashboard(radio: harness.radio)
+        let server = try WebServer(port: 0) { await dashboard.handle($0) }
+        let port = try await server.start()
+        defer { server.stop() }
+
+        // Browsers send Origin with every POST, naming the page's site.
+        func ignore(from origin: String) async throws -> Int? {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/review/\(song.id)/ignore")!)
+            request.httpMethod = "POST"
+            request.setValue(origin, forHTTPHeaderField: "Origin")
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return (response as? HTTPURLResponse)?.statusCode
+        }
+
+        #expect(try await ignore(from: "http://attacker.example") == 403)
+        #expect(try await ignore(from: "null") == 403)
+        #expect(try await harness.radio.heldSongs().count == 1)
+        // The review page's own form; the redirect back to it loads.
+        #expect(try await ignore(from: "http://127.0.0.1:\(port)") == 200)
+        #expect(try await harness.radio.heldSongs().isEmpty)
     }
 
     @Test func anHTTPSRequestFailsAtOnceInsteadOfHanging() async throws {

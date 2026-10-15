@@ -9,6 +9,11 @@ public struct Dashboard: Sendable {
     }
 
     public func handle(_ request: WebRequest) async -> WebResponse {
+        // Otherwise a page on another site could make changes through the
+        // browser of anyone on the home network.
+        if request.method != "GET", request.isFromAnotherSite {
+            return .text("Radio accepts changes only from its own pages.", status: 403)
+        }
         let parts = request.path.split(separator: "/").map(String.init)
         do {
             switch (request.method, parts.count) {
