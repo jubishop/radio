@@ -92,12 +92,15 @@ shows "sign-in expired". Repeat step 4.
   Radio's songs in play order.
 - **Status and data:** `radio status`, and `radio export > plays.csv` for
   every logged play.
-- **More stations:** `radio station add <audacy-slug>`, where the slug is the
-  path in the station's audacy.com URL, or
-  `radio station add <site> --source iheart` for an iHeartRadio station,
-  where the site is the name before `.iheart.com` in the station's own site,
-  such as `hits1061seattle`. Its songs join the "Radio" and "Radio Archive"
-  playlists.
+- **More stations:** add each with its network's command. Its songs join
+  the "Radio" and "Radio Archive" playlists.
+  - Audacy: `radio station add <slug>`, where the slug is the path in the
+    station's audacy.com URL, such as `alt1021rva`.
+  - iHeartRadio: `radio station add <site> --source iheart`, where the site is
+    the name before `.iheart.com` in the station's own site, such as
+    `hits1061seattle`.
+  - Hubbard Radio: `radio station add <domain> --source hubbard`, where the
+    domain is the station's own site, such as `movin925.com`.
 
 ## Upgrade from per-station playlists
 

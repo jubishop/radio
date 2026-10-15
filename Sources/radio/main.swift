@@ -5,10 +5,12 @@ let usage = """
     Usage: radio <command>
 
     Stations
-      station add <slug> [--source audacy|iheart] [--name NAME]
+      station add <slug> [--source audacy|iheart|hubbard] [--name NAME]
                               Follow a station. The slug is its audacy.com path,
-                              e.g. alt1021rva, or with --source iheart its
-                              iheart.com site name, e.g. hits1061seattle
+                              e.g. alt1021rva; with --source iheart its
+                              iheart.com site name, e.g. hits1061seattle; or
+                              with --source hubbard its site's domain, e.g.
+                              movin925.com
       station list            List followed stations
 
     Scheduled work
@@ -54,7 +56,7 @@ func makeRadio() throws -> Radio {
     return try Radio(
         home: .standard(),
         http: http,
-        sources: [AudacySource(http: http), IHeartSource(http: http)],
+        sources: [AudacySource(http: http), IHeartSource(http: http), HubbardSource(http: http)],
         notifier: PushoverNotifier(http: http, envFile: envFile),
         musicApp: ScriptedMusicApp()
     )
@@ -112,7 +114,7 @@ func main(_ arguments: [String]) async throws -> Int32 {
         let radio = try makeRadio()
         switch rest.first {
         case "add":
-            guard rest.count >= 2 else { throw UsageError(description: "Usage: radio station add <slug> [--source audacy|iheart] [--name NAME]") }
+            guard rest.count >= 2 else { throw UsageError(description: "Usage: radio station add <slug> [--source audacy|iheart|hubbard] [--name NAME]") }
             let station = try await radio.addStation(
                 slug: rest[1], source: try option("--source", in: rest) ?? "audacy", name: try option("--name", in: rest)
             )

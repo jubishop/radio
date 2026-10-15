@@ -145,6 +145,91 @@ public struct IHeartSource: PlaySource {
     }
 }
 
+/// Reads the public cue history behind Hubbard Radio's listen-live player.
+/// See docs/hubbard-listen-live-cues.md.
+public struct HubbardSource: PlaySource {
+    public let name = "hubbard"
+    let http: HTTPClient
+
+    /// The feed returns up to 300 plays, about 21 hours. 100 cover about
+    /// seven, close to what Radio reads from iHeartRadio.
+    static let count = 100
+
+    public init(http: HTTPClient) {
+        self.http = http
+    }
+
+    /// The slug is the station site's domain, such as `movin925.com`. Its
+    /// player, at live.movin925.com, is the feed ID.
+    public func lookUp(slug: String) async throws -> StationInfo {
+        let labels = slug.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, labels.allSatisfy({ label in
+            !label.isEmpty && label.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+        }) else {
+            throw SourceError(description: "\(slug) isn't a Hubbard Radio station's domain, such as movin925.com.")
+        }
+        let player = "live.\(slug)"
+        let url = URL(string: "https://\(player)/wp-json/hll/v1/hll_settings_get")!
+        let data = try await http.send(HTTPRequest(url: url, headers: ["Accept": "application/json"])).requireSuccess(for: url)
+        guard let name = (try? JSONDecoder().decode(Settings.self, from: data))?.data.stationName else {
+            throw SourceError(description: "No Hubbard Radio player at \(player). Check the slug.")
+        }
+        return StationInfo(slug: slug, source: self.name, feedID: player, name: name)
+    }
+
+    public func recentPlays(feedID: String) async throws -> [FeedPlay] {
+        let url = URL(string: "https://\(feedID)/wp-json/hll/v1/hll_cues_get")!
+        let request = HTTPRequest(
+            method: "POST", url: url,
+            headers: ["Accept": "application/json", "Content-Type": "application/json"],
+            body: Data(#"{"limit":\#(Self.count)}"#.utf8)
+        )
+        let data = try await http.send(request).requireSuccess(for: url)
+        // The player skips ad cues, and only songs belong in the log.
+        return try JSONDecoder().decode(Cues.self, from: data).data.response.compactMap { cue in
+            guard cue.type == "song", let startTime = TimeInterval(cue.timestamp) else { return nil }
+            return FeedPlay(
+                playID: cue.id,
+                playedAt: Date(timeIntervalSince1970: startTime),
+                artist: cue.data?.artist?.trimmingCharacters(in: .whitespaces) ?? "",
+                title: cue.data?.description?.trimmingCharacters(in: .whitespaces) ?? ""
+            )
+        }
+    }
+
+    private struct Settings: Decodable {
+        let data: Fields
+
+        struct Fields: Decodable {
+            let stationName: String
+
+            enum CodingKeys: String, CodingKey {
+                case stationName = "hll-station-name"
+            }
+        }
+    }
+
+    private struct Cues: Decodable {
+        let data: Page
+
+        struct Page: Decodable {
+            let response: [Cue]
+        }
+    }
+
+    private struct Cue: Decodable {
+        let id: String
+        let timestamp: String
+        let type: String
+        let data: Song?
+
+        struct Song: Decodable {
+            let artist: String?
+            let description: String?
+        }
+    }
+}
+
 func firstMatch(_ pattern: String, in text: String) -> String? {
     guard let regex = try? NSRegularExpression(pattern: pattern),
           let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),

@@ -10,8 +10,9 @@ named "Radio", and the 10,000 most recently played in "Radio Archive". This
 page records the
 accepted decisions, the constraints they rest on, and the questions still
 open. Feed details are in
-[Audacy now-playing feed](audacy-now-playing-feed.md) and
-[iHeartRadio track history](iheart-track-history.md).
+[Audacy now-playing feed](audacy-now-playing-feed.md),
+[iHeartRadio track history](iheart-track-history.md), and
+[Hubbard Radio listen-live cues](hubbard-listen-live-cues.md).
 
 ## Constraints
 
@@ -21,7 +22,7 @@ open. Feed details are in
 - **Audacy's feed keeps only the last 50 plays,** about four hours, and
   older plays can't be fetched. If the logger stops for longer than that,
   those plays are lost. iHeartRadio's feed returns up to 200 plays, about 18
-  hours.
+  hours, and Hubbard Radio's up to 300, about 21 hours.
 - **Apple publishes no playlist size limit.** Apple's
   [Music guide](https://support.apple.com/guide/music/access-to-your-music-library-musa3dd5209/mac)
   caps the cloud library at 100,000 songs, not counting iTunes Store
@@ -233,6 +234,14 @@ Hits 106.1 (KBKS-FM), which iHeartMedia owns and Audacy doesn't carry, so
 Radio gained a second reader, for iHeartRadio's public
 [track history](iheart-track-history.md). An iHeartRadio station's songs go
 into the same two playlists as every other station's.
+
+### Read Hubbard Radio stations, starting with MOViN 92.5
+
+Accepted 2026-10-15. The user asked to add 92.5 in Seattle. That station is
+MOViN 92.5 (KQMV), which Hubbard Broadcasting owns and neither Audacy nor
+iHeartRadio carries, so Radio gained a third reader, for the public
+[cue history](hubbard-listen-live-cues.md) behind Hubbard Radio's listen-live
+player. Its songs go into the same two playlists as every other station's.
 
 ### Funnel every station into one playlist named "Radio"
 
@@ -459,7 +468,7 @@ explicitly approved them.
   executable, and Swift Testing tests. Fakes sit at the HTTP boundary, and
   tests use a real SQLite database in a temporary directory.
 - **Commands:**
-  - `radio station add <slug> [--source audacy|iheart]` and
+  - `radio station add <slug> [--source audacy|iheart|hubbard]` and
     `radio station list`
   - `radio poll` and `radio sync`
   - `radio run`, which polls, syncs, and handles alerts and the weekly nudge
@@ -482,6 +491,10 @@ explicitly approved them.
   station API gives the name. Each poll reads the 100 latest plays, about
   eight hours, so a long outage loses fewer. The feed has no play ID, so a
   play's start time identifies it.
+- **Hubbard Radio stations:** the slug is the station site's domain, such as
+  `movin925.com`, and its player's host, `live.movin925.com`, is the feed ID.
+  The player's settings give the name. Each poll reads the 100 latest cues,
+  about seven hours, keeps only songs, and uses each cue's ID as its play ID.
 - **Song identity:** a song is its normalized primary artist plus its title
   without parenthetical suffixes. The playlist holds an Apple Music catalog
   ID at most once.

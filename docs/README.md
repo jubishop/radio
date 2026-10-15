@@ -68,3 +68,5 @@ hand-written pages to bypass failed checks.
   that lists a station's recent plays, and its limits.
 - [iHeartRadio track history](iheart-track-history.md): how to find an
   iHeartRadio station's stream ID, and the JSON feed of its recent plays.
+- [Hubbard Radio listen-live cues](hubbard-listen-live-cues.md): how to find
+  a Hubbard Radio station's player, and the JSON feed of its recent plays.

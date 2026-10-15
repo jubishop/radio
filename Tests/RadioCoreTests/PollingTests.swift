@@ -54,6 +54,52 @@ import Testing
         #expect(results.map(\.newPlays) == [100])
     }
 
+    @Test func addingAHubbardStationReadsItsNameFromItsPlayerSettings() async throws {
+        let harness = try Harness()
+        let station = try await harness.radio.addStation(slug: "movin925.com", source: "hubbard")
+        #expect(station.feedID == "live.movin925.com")
+        #expect(station.name == "MOViN 92.5")
+        #expect(station.source == "hubbard")
+    }
+
+    @Test func aHubbardSlugMustBeAStationDomain() async throws {
+        let harness = try Harness()
+        for slug in ["movin925", "https://movin925.com", "movin925.com/", "movin925..com", "nosuchstation.com"] {
+            await #expect(throws: (any Error).self) { try await harness.radio.addStation(slug: slug, source: "hubbard") }
+        }
+        #expect(harness.http.requests("GET https://live.movin925").isEmpty)
+        #expect(try await harness.radio.stations().isEmpty)
+    }
+
+    @Test func hubbardSongsAreLoggedOnceAcrossOverlappingPollsAndOtherCuesAreSkipped() async throws {
+        let harness = try Harness()
+        _ = try await harness.radio.addStation(slug: "movin925.com", source: "hubbard")
+        let played = harness.clock.now.addingTimeInterval(-600)
+        harness.hubbard.play("Tame Impala", "Loser", at: played)
+        harness.hubbard.play("Sponsor", "Thirty Second Spot", at: played.addingTimeInterval(220), type: "ad")
+
+        let first = try await harness.radio.poll()
+        harness.hubbard.play("Dominic Fike", "Babydoll", at: harness.clock.now)
+        let second = try await harness.radio.poll()
+
+        #expect(first.map(\.newPlays) == [1])
+        #expect(second.map(\.newPlays) == [1])
+        let rows = try await harness.radio.exportCSV(stationSlug: "movin925.com").split(separator: "\n").dropFirst()
+            .map { $0.split(separator: ",").map(String.init) }
+        #expect(rows.map { $0[2...3].joined(separator: " – ") } == ["Tame Impala – Loser", "Dominic Fike – Babydoll"])
+        #expect(rows.first?[1] == played.formatted(.iso8601))
+    }
+
+    @Test func pollRequestsAHundredHubbardPlays() async throws {
+        let harness = try Harness()
+        _ = try await harness.radio.addStation(slug: "movin925.com", source: "hubbard")
+        for minute in 0..<150 {
+            harness.hubbard.play("Artist \(minute)", "Song \(minute)", at: harness.clock.now.addingTimeInterval(Double(minute - 150) * 60))
+        }
+        let results = try await harness.radio.poll()
+        #expect(results.map(\.newPlays) == [100])
+    }
+
     @Test func addingAStationTwiceFails() async throws {
         let harness = try Harness()
         _ = try await harness.radio.addStation(slug: "alt1021rva")

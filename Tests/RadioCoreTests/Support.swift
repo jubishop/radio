@@ -119,6 +119,35 @@ final class FakeIHeart: Sendable {
     }
 }
 
+/// Hubbard Radio's listen-live player settings and cue history.
+final class FakeHubbard: Sendable {
+    private let cues = Mutex<[(id: Int, time: Date, type: String, artist: String, title: String)]>([])
+    private let nextID = Mutex(40_200_000)
+
+    init(http: FakeHTTP) {
+        http.on("GET https://live.movin925.com/wp-json/hll/v1/hll_settings_get") { _ in
+            json(["success": true, "data": ["hll-station-name": "MOViN 92.5", "hll-station-call-letters": "KQMV"]])
+        }
+        // A WordPress site answers an unknown route with an empty 200.
+        http.on("GET https://live.nosuchstation.com/") { _ in HTTPResponse(status: 200, body: Data()) }
+        http.on("POST https://live.movin925.com/wp-json/hll/v1/hll_cues_get") { [self] request in
+            let body = (try? JSONSerialization.jsonObject(with: request.body ?? Data())) as? [String: Any]
+            let limit = body?["limit"] as? Int ?? 6
+            let recent = cues.withLock { $0 }.suffix(min(limit, 300)).reversed()
+            return json(["success": true, "data": ["code": 200, "response": recent.map {
+                ["id": String($0.id), "application": "25", "timestamp": String(Int($0.time.timeIntervalSince1970)),
+                 "type": $0.type, "cut_id": "cut", "likes": 0, "itunes_url": "",
+                 "data": ["cut_id": "cut", "description": $0.title, "artist": $0.artist, "album": "", "time": "180000"]]
+            }]])
+        }
+    }
+
+    func play(_ artist: String, _ title: String, at time: Date, type: String = "song") {
+        let id = nextID.withLock { value in defer { value += 1 }; return value }
+        cues.withLock { $0.append((id, time, type, artist, title)) }
+    }
+}
+
 /// The parts of the Apple Music API Radio uses, with two copies of the
 /// library: Apple's, which the API changes, and Music.app's on the Mac. A
 /// sync uploads each playlist Music.app changed, replacing Apple's copy, and
@@ -392,6 +421,7 @@ struct Harness {
     let clock = TestClock()
     let audacy: FakeAudacy
     let iheart: FakeIHeart
+    let hubbard: FakeHubbard
     let music: FakeAppleMusic
     let musicApp: FakeMusicApp
     let home: RadioHome
@@ -401,6 +431,7 @@ struct Harness {
         self.http = http
         audacy = FakeAudacy(http: http)
         iheart = FakeIHeart(http: http)
+        hubbard = FakeHubbard(http: http)
         music = FakeAppleMusic(http: http)
         musicApp = FakeMusicApp(music: music)
         http.on("POST https://api.pushover.net/") { _ in json(["status": 1]) }
@@ -410,7 +441,7 @@ struct Harness {
         radio = try Radio(
             home: home,
             http: http,
-            sources: [AudacySource(http: http), IHeartSource(http: http)],
+            sources: [AudacySource(http: http), IHeartSource(http: http), HubbardSource(http: http)],
             notifier: PushoverNotifier(http: http, userKey: pushover ? "user" : nil, apiKey: pushover ? "app" : nil),
             musicApp: musicApp,
             playlistLimit: playlistLimit,
