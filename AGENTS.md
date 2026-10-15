@@ -38,6 +38,10 @@ Project Starter manages this block; add project rules after it.
   run `bin/check --full` locally before merging. Commands, versions, and
   deployment (`bin/deploy`) are in
   [development workflow](docs/development-workflow.md).
+- Deliver finished changes without asking: once the required checks pass,
+  commit to `main`, push, and run `bin/deploy` whenever the
+  [development workflow](docs/development-workflow.md#deployment) calls for
+  it.
 - Run the CLI from a checkout with `RADIO_HOME` set to a scratch directory and
   `RADIO_ENV_FILE=/dev/null`, so it never touches the live database or sends
   alerts.
