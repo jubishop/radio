@@ -496,4 +496,6 @@ explicitly approved them.
 
 ## Open questions
 
-None remain.
+- Whether songs Radio drops from "Radio" and "Radio Archive" should also
+  leave the library. Radio keeps them there for now, and the user hasn't
+  decided (td-b818f2, 2026-10-13).

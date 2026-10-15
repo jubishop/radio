@@ -69,6 +69,14 @@ Pushing never deploys. Changes to Markdown, tests, CI, or task tracking need no
 [deployment policy](foundation/engineering-policy.md#deployment-decisions),
 note when an install is skipped and which commit was last installed.
 
+Before deploying a schema change, rehearse it on a copy of the live database.
+Copy `radio.sqlite` with SQLite's `.backup` command into an empty scratch
+directory, then run a command from the new checkout, such as
+`RADIO_HOME=<scratch> RADIO_ENV_FILE=/dev/null swift run radio status`, so the
+copy is migrated. Check the result against the live data before deploying.
+The schema 3 and 4 migrations were rehearsed this way on 2026-10-13
+(td-b818f2).
+
 ## Project Starter
 
 `.project-starter.json` records the installed Project Starter release and the
