@@ -85,7 +85,7 @@ enum Pages {
     /// lists past decisions to undo.
     private static func review(count: Int) -> String {
         count == 0
-            ? "<a href=\"/review\">No songs to review</a>"
+            ? "<a href=\"/review\" class=\"good\">No songs to review</a>"
             : "<a href=\"/review\" class=\"bad\">\(count) song\(count == 1 ? "" : "s") to review</a>"
     }
 

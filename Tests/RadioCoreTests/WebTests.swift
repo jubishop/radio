@@ -41,7 +41,7 @@ import Testing
 
         let page = text(await Dashboard(radio: harness.radio).handle(request("GET", "/")))
 
-        #expect(page.contains(#"<a href="/review">No songs to review</a>"#))
+        #expect(page.contains(#"<a href="/review" class="good">No songs to review</a>"#))
     }
 
     @Test func eachPlaylistsPageListsItsSongsWithTheStationsThatPlayedThem() async throws {
