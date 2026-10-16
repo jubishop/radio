@@ -111,6 +111,47 @@ import Testing
         #expect(lake.decision == .jev(score: 0.95, model: "jev-1.15.0"))
     }
 
+    /// The user asked on 2026-10-15 for songs held before candidates had
+    /// ISRCs and lengths to be searched and judged again, once.
+    @Test func upgradingSearchesAgainForSongsHeldBeforeCandidatesHadISRCs() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        var unplugged = harness.music.addToCatalog("Nirvana", "Lake of Fire (Live Acoustic)")
+        var live = harness.music.addToCatalog("Nirvana", "Come As You Are (Live)")
+        harness.play("Nirvana", "Lake Of Fire", minutesAgo: 5)
+        harness.play("Nirvana", "Come As You Are")
+        _ = try await harness.radio.run()
+        let sentBack = try #require(try await harness.radio.heldSongs().first { $0.title == "Come As You Are" })
+        _ = try await harness.radio.match(songID: sentBack.id, choice: .candidate(0))
+        try await harness.radio.undo(songID: sentBack.id)
+        // As an earlier release saved them, without ISRCs or lengths.
+        unplugged.isrc = nil; unplugged.durationMillis = nil
+        live.isrc = nil; live.durationMillis = nil
+        let oldLake = String(decoding: try JSONEncoder().encode([unplugged]), as: UTF8.self)
+        let oldLive = String(decoding: try JSONEncoder().encode([live]), as: UTF8.self)
+        executeSQL([
+            "UPDATE songs SET candidates = '\(oldLake)', jev_score = 0.37 WHERE title = 'Lake Of Fire'",
+            "UPDATE songs SET candidates = '\(oldLive)' WHERE title = 'Come As You Are'",
+            "PRAGMA user_version = 8",
+        ], in: harness.home)
+        harness.jev.score("Lake of Fire (Live Acoustic)", 0.79)
+        let clock = harness.clock
+        let upgraded = try Radio(
+            home: harness.home, http: harness.http, sources: [AudacySource(http: harness.http)],
+            notifier: PushoverNotifier(http: harness.http, userKey: nil, apiKey: nil), musicApp: harness.musicApp,
+            jevAPIKey: "jev-key", now: { clock.now }
+        )
+
+        _ = try await upgraded.sync()
+
+        let held = try await upgraded.heldSongs()
+        #expect(held.first { $0.title == "Lake Of Fire" }?.suggestion == JevSuggestion(candidate: 0, score: 0.79))
+        #expect(held.first { $0.title == "Lake Of Fire" }?.candidates.first?.isrc != nil)
+        #expect(held.first { $0.title == "Come As You Are" }?.candidates.first?.isrc == nil)
+        #expect(FakeJev.askedTitles(harness.http) == ["Lake Of Fire", "Come As You Are", "Lake Of Fire"])
+    }
+
     @Test func withoutAKeyJevIsNotAsked() async throws {
         let harness = try Harness(jevAPIKey: nil)
         try await harness.signIn()

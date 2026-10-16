@@ -384,7 +384,9 @@ from each answer, and when that changes, it asks about every held song judged
 by an older model once more, leaving out songs the user sent back. So held
 songs meet a new model after the next song is held. The user agreed to this
 on 2026-10-15, since Radio follows the newest model and a newer one may be
-sure where an older one wasn't. When a request fails, the song waits for the
+sure where an older one wasn't. Songs held before candidates had ISRCs and
+lengths were searched and judged again once, on upgrading to schema 9, at
+the user's request the same day. When a request fails, the song waits for the
 next sync and the dashboard shows the error. Without `JEV_API_KEY` in the env
 file, Radio doesn't ask Jev.
 

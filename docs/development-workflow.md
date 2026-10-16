@@ -75,7 +75,8 @@ directory, then run a command from the new checkout, such as
 `RADIO_HOME=<scratch> RADIO_ENV_FILE=/dev/null swift run radio status`, so the
 copy is migrated. Check the result against the live data before deploying.
 The schema 3 and 4 migrations were rehearsed this way on 2026-10-13
-(td-b818f2), and schema 7 on 2026-10-15 (td-224df6).
+(td-b818f2), schema 7 on 2026-10-15 (td-224df6), and schemas 8 and 9 the same
+day (td-810dd1).
 
 ## Project Starter
 

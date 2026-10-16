@@ -176,7 +176,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 8
+    private static let schemaVersion: Int64 = 9
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -192,6 +192,7 @@ final class Store {
             if version < 6 { try migrateToSchemaSix() }
             if version < 7 { try migrateToSchemaSeven() }
             if version < 8 { try migrateToSchemaEight() }
+            if version < 9 { try migrateToSchemaNine() }
         }
     }
 
@@ -381,6 +382,21 @@ final class Store {
             "CREATE TABLE playlist_removals (catalog_id TEXT PRIMARY KEY, name TEXT NOT NULL, artist TEXT NOT NULL, album TEXT NOT NULL)"
         )
         try db.execute("PRAGMA user_version = 8")
+    }
+
+    /// Held songs saved before candidates had ISRCs and lengths go back to
+    /// be searched again, so Jev's question can collapse their copies. The
+    /// user asked for this once, on 2026-10-15. Songs the user sent back stay.
+    private func migrateToSchemaNine() throws {
+        try db.execute(
+            """
+            UPDATE songs SET status = 'pending', candidates = NULL, held_at = NULL, jev_checked_at = NULL,
+                jev_model = NULL, jev_score = NULL, jev_pick = NULL
+            WHERE status = 'unmatched' AND undone_at IS NULL
+                AND (candidates IS NULL OR candidates NOT LIKE '%"isrc"%')
+            """
+        )
+        try db.execute("PRAGMA user_version = 9")
     }
 
     // MARK: Stations
