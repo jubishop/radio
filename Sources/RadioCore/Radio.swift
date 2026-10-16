@@ -252,6 +252,14 @@ public actor Radio {
         do {
             try await fillCatalogDetails(client: client)
             report.replaced = try await replaceRejectedMatches(music: &music)
+            // A song held back before a matching fix may now match one of its
+            // candidates.
+            for song in try store.songs(status: .unmatched) {
+                if let match = chooseMatch(artist: song.artist, title: song.title, candidates: song.candidates) {
+                    try store.markMatched(songID: song.id, catalog: match, by: "auto", at: now())
+                    report.matched += 1
+                }
+            }
             for song in try store.songs(status: .pending) {
                 let results = try await client.searchSongs(SongIdentity.searchTerm(artist: song.artist, title: song.title))
                 if let match = chooseMatch(artist: song.artist, title: song.title, candidates: results) {

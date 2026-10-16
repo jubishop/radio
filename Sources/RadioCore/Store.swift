@@ -128,7 +128,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 6
+    private static let schemaVersion: Int64 = 7
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -142,6 +142,7 @@ final class Store {
             if version < 4 { try migrateToSchemaFour() }
             if version < 5 { try migrateToSchemaFive() }
             if version < 6 { try migrateToSchemaSix() }
+            if version < 7 { try migrateToSchemaSeven() }
         }
     }
 
@@ -297,6 +298,28 @@ final class Store {
     private func migrateToSchemaSix() throws {
         try db.execute("CREATE TABLE music_comments (catalog_id TEXT PRIMARY KEY, text TEXT NOT NULL)")
         try db.execute("PRAGMA user_version = 6")
+    }
+
+    /// Plays logged before feeds were decoded keep text such as "Macklemore
+    /// &amp; Ryan Lewis", which can't match. They're decoded, and each song
+    /// takes its decoded key unless another song already has it.
+    private func migrateToSchemaSeven() throws {
+        let encoded = "WHERE artist LIKE '%&%;%' OR title LIKE '%&%;%'"
+        for row in try db.query("SELECT station_id, play_id, artist, title FROM plays \(encoded)") {
+            try db.execute(
+                "UPDATE plays SET artist = ?, title = ? WHERE station_id = ? AND play_id = ?",
+                [.text(decodeEntities(row.string("artist")!)), .text(decodeEntities(row.string("title")!)),
+                 .integer(row.int("station_id")!), .text(row.string("play_id")!)]
+            )
+        }
+        for row in try db.query("SELECT id, artist, title FROM songs \(encoded)") {
+            let artist = decodeEntities(row.string("artist")!), title = decodeEntities(row.string("title")!)
+            try db.execute("UPDATE songs SET artist = ?, title = ? WHERE id = ?",
+                           [.text(artist), .text(title), .integer(row.int("id")!)])
+            try db.execute("UPDATE OR IGNORE songs SET key = ? WHERE id = ?",
+                           [.text(SongIdentity.key(artist: artist, title: title)), .integer(row.int("id")!)])
+        }
+        try db.execute("PRAGMA user_version = 7")
     }
 
     // MARK: Stations

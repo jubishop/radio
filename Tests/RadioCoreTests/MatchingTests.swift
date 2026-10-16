@@ -18,6 +18,38 @@ import Testing
         #expect(match != nil)
     }
 
+    /// Seen 2026-10-15: each of these credits held back a song that Apple
+    /// Music credits differently.
+    @Test func aCreditSharingALeadArtistMatches() {
+        #expect(chooseMatch(artist: "BEYONCE/JAY-Z", title: "CRAZY IN LOVE",
+                            candidates: [song("Beyoncé", "Crazy in Love (feat. JAŸ-Z)")]) != nil)
+        #expect(chooseMatch(artist: "Usher f/ Pitbull", title: "DJ Got Us Fallin' In Love",
+                            candidates: [song("USHER", "DJ Got Us Fallin' In Love (feat. Pitbull)")]) != nil)
+        #expect(chooseMatch(artist: "21 Savage, Metro Boomin, The Weeknd", title: "Creepin",
+                            candidates: [song("Metro Boomin, The Weeknd & 21 Savage", "Creepin'")]) != nil)
+    }
+
+    /// Seen 2026-10-13 to 15: songs held back for a featured credit in the
+    /// played title.
+    @Test func aFeaturedCreditInTheTitleIsIgnored() {
+        #expect(chooseMatch(artist: "Weezer", title: "We Might As Well Be Strangers Ft. Wednesday",
+                            candidates: [song("Weezer", "We Might as Well Be Strangers (ft. Wednesday)")]) != nil)
+        #expect(chooseMatch(artist: "Justice", title: "Flower In A Hurricane Ft. Tame Impala, Sza",
+                            candidates: [song("Justice, Tame Impala, SZA & King Gizzard & The Lizard Wizard",
+                                              "Flower In A Hurricane [from GTAVI]")]) != nil)
+    }
+
+    @Test func aNameWithASlashOrAmpersandStillMatchesItself() {
+        #expect(chooseMatch(artist: "HUNTR/X", title: "Golden", candidates: [song("HUNTR/X", "Golden")]) != nil)
+        #expect(chooseMatch(artist: "Mumford & Sons", title: "I Will Wait",
+                            candidates: [song("Mumford and Sons", "I Will Wait")]) != nil)
+    }
+
+    @Test func sharingOnlyAFeaturedArtistDoesNotMatch() {
+        #expect(chooseMatch(artist: "Calvin Harris feat. Rihanna", title: "Same Old Song",
+                            candidates: [song("David Guetta & Rihanna", "Same Old Song")]) == nil)
+    }
+
     @Test func ampersandAndPunctuationAreIgnored() {
         #expect(chooseMatch(artist: "Mumford & Sons", title: "I Will Wait",
                             candidates: [song("Mumford & Sons", "I Will Wait")]) != nil)

@@ -36,12 +36,25 @@ enum SongIdentity {
         normalizeArtist(artistParts(artist).first ?? artist)
     }
 
-    /// The full credit plus its first credited artist, normalized.
-    static func artistKeys(_ artist: String) -> Set<String> {
-        var keys: Set<String> = [normalizeArtist(artist)]
-        if let first = artistParts(artist).first { keys.insert(normalizeArtist(first)) }
-        keys.remove("")
-        return keys
+    /// Whether two credits name the same act: they match as a whole, or
+    /// either one's lead artist is credited anywhere in the other.
+    static func sameArtist(_ artist: String, _ other: String) -> Bool {
+        let artists = creditedArtists(artist), others = creditedArtists(other)
+        return normalizeArtist(artist) == normalizeArtist(other)
+            || artists.first.map(others.contains) == true
+            || others.first.map(artists.contains) == true
+    }
+
+    /// The credit's artists, normalized, lead artist first. This splits more
+    /// than `key` does, at "BEYONCE/JAY-Z" and "Usher f/ Pitbull", because
+    /// splitting there in `key` would also split names like "HUNTR/X" and
+    /// change the keys of logged songs.
+    private static func creditedArtists(_ artist: String) -> [String] {
+        artist.replacingOccurrences(of: #"\s*(\bf)?/\s*"#, with: "\u{1F}", options: [.regularExpression, .caseInsensitive])
+            .split(separator: "\u{1F}")
+            .flatMap { artistParts(String($0)) }
+            .map(normalizeArtist)
+            .filter { !$0.isEmpty }
     }
 
     /// The title without parenthetical or bracketed notes or a " - " suffix.
@@ -52,6 +65,16 @@ enum SongIdentity {
         }
         let trimmed = result.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? title : trimmed
+    }
+
+    /// The title as matching compares it: the base title without a trailing
+    /// featured credit, as in "Rein Me In Ft. Olivia Dean". `key` keeps the
+    /// credit, so logged songs keep their keys.
+    static func matchingTitle(_ title: String) -> String {
+        let base = baseTitle(title)
+        let uncredited = base.replacingOccurrences(of: #"\s+(ft|feat|featuring)\b.*$"#, with: "",
+                                                   options: [.regularExpression, .caseInsensitive])
+        return normalize(uncredited.isEmpty ? base : uncredited)
     }
 
     static func normalize(_ text: String) -> String {
@@ -96,12 +119,11 @@ enum SongIdentity {
 /// Picks the catalog song for a played song, or nil when no candidate
 /// matches strictly enough to add without review.
 public func chooseMatch(artist: String, title: String, candidates: [CatalogSong]) -> CatalogSong? {
-    let artistKeys = SongIdentity.artistKeys(artist)
-    let wantedTitle = SongIdentity.normalize(SongIdentity.baseTitle(title))
+    let wantedTitle = SongIdentity.matchingTitle(title)
     let alternateWanted = SongIdentity.isAlternateVersion(title: title)
     let accepted = candidates.filter { candidate in
-        guard !artistKeys.isDisjoint(with: SongIdentity.artistKeys(candidate.artistName)),
-              SongIdentity.normalize(SongIdentity.baseTitle(candidate.name)) == wantedTitle
+        guard SongIdentity.sameArtist(artist, candidate.artistName),
+              SongIdentity.matchingTitle(candidate.name) == wantedTitle
         else { return false }
         if alternateWanted { return true }
         return !SongIdentity.isAlternateVersion(title: candidate.name) && !SongIdentity.isAlternateAlbum(candidate.albumName)

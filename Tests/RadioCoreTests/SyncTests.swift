@@ -83,6 +83,57 @@ import Testing
         #expect(harness.music.playlists().isEmpty)
     }
 
+    /// Without this, a song held back before a matching fix would wait for
+    /// review even though the fix now accepts one of its candidates.
+    @Test func heldSongsTheCurrentRulesAcceptAreAddedWithoutReview() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Nirvana", "Come As You Are (Live)")
+        harness.play("Nirvana", "Come As You Are")
+        _ = try await harness.radio.run()
+        // As if an earlier release had held back the studio version.
+        let studio = harness.music.addToCatalog("Nirvana", "Come As You Are", album: "Nevermind")
+        let candidates = String(decoding: try JSONEncoder().encode([studio]), as: UTF8.self)
+        executeSQL(["UPDATE songs SET candidates = '\(candidates)'"], in: harness.home)
+
+        let report = try await harness.radio.sync()
+
+        #expect(report.matched == 1)
+        #expect(try await harness.radio.heldSongs().isEmpty)
+        #expect(harness.music.playlists()["Radio"] == ["Come As You Are"])
+    }
+
+    /// Before feeds were decoded, MOViN 92.5 logged "Macklemore &amp; Ryan
+    /// Lewis", which held the song back.
+    @Test func upgradingDecodesHTMLEntitiesInLoggedSongs() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "movin925.com", source: "hubbard")
+        harness.music.addToCatalog("Macklemore & Ryan Lewis", "Can't Hold Us (feat. Ray Dalton)")
+        harness.hubbard.play("Macklemore & Ryan Lewis", "Can't Hold Us", at: harness.clock.now.addingTimeInterval(-600))
+        _ = try await harness.radio.poll()
+        executeSQL([
+            "UPDATE songs SET artist = 'Macklemore &amp; Ryan Lewis', key = 'macklemore and amp ryan lewis|cant hold us'",
+            "UPDATE plays SET artist = 'Macklemore &amp; Ryan Lewis'",
+            "PRAGMA user_version = 6",
+        ], in: harness.home)
+        let clock = harness.clock
+        let upgraded = try Radio(
+            home: harness.home, http: harness.http, sources: [HubbardSource(http: harness.http)],
+            notifier: PushoverNotifier(http: harness.http, userKey: nil, apiKey: nil), musicApp: harness.musicApp,
+            now: { clock.now }
+        )
+        harness.hubbard.play("Macklemore & Ryan Lewis", "Can't Hold Us", at: harness.clock.now)
+
+        _ = try await upgraded.run()
+
+        #expect(try await upgraded.heldSongs().isEmpty)
+        #expect(harness.music.playlists()["Radio"] == ["Can't Hold Us (feat. Ray Dalton)"])
+        let rows = try await upgraded.exportCSV(stationSlug: nil).split(separator: "\n").dropFirst()
+        #expect(rows.count == 2 && rows.allSatisfy { $0.contains(",Macklemore & Ryan Lewis,Can't Hold Us,") })
+    }
+
     @Test func pickingACandidateAddsItOnTheNextSync() async throws {
         let harness = try Harness()
         try await harness.signIn()

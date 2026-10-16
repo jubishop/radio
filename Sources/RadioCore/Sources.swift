@@ -62,8 +62,8 @@ public struct AudacySource: PlaySource {
             return FeedPlay(
                 playID: String(performance.id),
                 playedAt: date,
-                artist: performance.artist?.trimmingCharacters(in: .whitespaces) ?? "",
-                title: performance.title?.trimmingCharacters(in: .whitespaces) ?? ""
+                artist: feedText(performance.artist),
+                title: feedText(performance.title)
             )
         }
     }
@@ -120,8 +120,8 @@ public struct IHeartSource: PlaySource {
             FeedPlay(
                 playID: String(track.startTime),
                 playedAt: Date(timeIntervalSince1970: TimeInterval(track.startTime)),
-                artist: track.artist?.trimmingCharacters(in: .whitespaces) ?? "",
-                title: track.title?.trimmingCharacters(in: .whitespaces) ?? ""
+                artist: feedText(track.artist),
+                title: feedText(track.title)
             )
         }
     }
@@ -191,8 +191,8 @@ public struct HubbardSource: PlaySource {
             return FeedPlay(
                 playID: cue.id,
                 playedAt: Date(timeIntervalSince1970: startTime),
-                artist: cue.data?.artist?.trimmingCharacters(in: .whitespaces) ?? "",
-                title: cue.data?.description?.trimmingCharacters(in: .whitespaces) ?? ""
+                artist: feedText(cue.data?.artist),
+                title: feedText(cue.data?.description)
             )
         }
     }
@@ -239,9 +239,18 @@ func firstMatch(_ pattern: String, in text: String) -> String? {
     return String(text[range])
 }
 
+/// A feed's artist or title, trimmed and decoded. Feeds sometimes send HTML
+/// entities, such as "Macklemore &amp; Ryan Lewis".
+func feedText(_ text: String?) -> String {
+    decodeEntities(text ?? "").trimmingCharacters(in: .whitespaces)
+}
+
+/// Decodes HTML character references: numeric ones and the common names.
 func decodeEntities(_ text: String) -> String {
-    text.replacingOccurrences(of: "&amp;", with: "&")
-        .replacingOccurrences(of: "&#x27;", with: "'")
-        .replacingOccurrences(of: "&#39;", with: "'")
-        .replacingOccurrences(of: "&quot;", with: "\"")
+    let names = ["amp": "&", "quot": "\"", "apos": "'", "lt": "<", "gt": ">", "nbsp": " "]
+    return text.replacing(#/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|([a-zA-Z]+));/#) { match in
+        let code = match.1.flatMap { UInt32($0) } ?? match.2.flatMap { UInt32($0, radix: 16) }
+        if let code, let scalar = Unicode.Scalar(code) { return String(Character(scalar)) }
+        return match.3.flatMap { names[String($0)] } ?? String(match.0)
+    }
 }

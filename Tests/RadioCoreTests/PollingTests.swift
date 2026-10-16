@@ -90,6 +90,25 @@ import Testing
         #expect(rows.first?[1] == played.formatted(.iso8601))
     }
 
+    /// Seen 2026-10-15: MOViN 92.5's feed sent "Macklemore &amp; Ryan Lewis",
+    /// which kept the song from matching.
+    @Test func htmlEntitiesInFeedsAreDecoded() async throws {
+        let harness = try Harness()
+        _ = try await harness.radio.addStation(slug: "movin925.com", source: "hubbard")
+        _ = try await harness.radio.addStation(slug: "hits1061seattle", source: "iheart")
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.hubbard.play("Macklemore &amp; Ryan Lewis", "Can&#039;t Hold Us", at: harness.clock.now)
+        harness.iheart.play("Simon &amp; Garfunkel", "Mrs. Robinson &#x2014; Live", at: harness.clock.now)
+        harness.play("Hall &amp; Oates", "You Make My Dreams (Come True) &quot;Remastered&quot;")
+
+        _ = try await harness.radio.poll()
+
+        let rows = try await harness.radio.exportCSV(stationSlug: nil).split(separator: "\n").dropFirst()
+        #expect(rows.contains { $0.contains(",Macklemore & Ryan Lewis,Can't Hold Us,") })
+        #expect(rows.contains { $0.contains(",Simon & Garfunkel,Mrs. Robinson — Live,") })
+        #expect(rows.contains { $0.contains(#",Hall & Oates,"You Make My Dreams (Come True) ""Remastered""","#) })
+    }
+
     @Test func pollRequestsAHundredHubbardPlays() async throws {
         let harness = try Harness()
         _ = try await harness.radio.addStation(slug: "movin925.com", source: "hubbard")

@@ -60,6 +60,10 @@ POST https://live.<domain>/wp-json/hll/v1/hll_cues_get
   seconds, and `id` and `timestamp` are strings.
 - `data.description` is the title. `data.time` is the length in
   milliseconds.
+- Artists and titles sometimes carry HTML entities. One of MOViN 92.5's first
+  189 logged plays was "Macklemore &amp; Ryan Lewis", though others had a
+  plain "&". Radio decodes entities in every feed's artists and titles, and
+  schema 7 decoded those already logged.
 - `id` names the play. IDs were distinct in a 300-cue sample, and cues from
   KS95 and WDRV came from the same sequence, so Radio uses `id` as the play
   ID.

@@ -344,6 +344,19 @@ choice is remembered for that song across every station.
 The user chose strict matching because the API can't remove a wrong track,
 so a bad match would stay in the playlist until it's deleted by hand in Music.
 
+On 2026-10-15 the user approved fixing gaps that held back songs Apple Music
+credits differently (td-224df6). The artists now match when either credit's
+lead artist appears anywhere in the other, so "21 Savage, Metro Boomin, The
+Weeknd" matches "Metro Boomin, The Weeknd & 21 Savage". Matching also splits
+"BEYONCE/JAY-Z" and "Usher f/ Pitbull" into two artists, and ignores a
+featured credit at the end of a title, as in "Rein Me In Ft. Olivia Dean".
+Song identity doesn't split or drop these, because doing so would also split
+names like "HUNTR/X" and change the keys of logged songs. Each sync now
+rechecks held songs against their stored candidates as well. Replayed against
+the live database that day, the fix rejected none of the 539 automatic
+matches, cleared five of the nine held songs, and would have matched four of
+the 15 earlier manual picks.
+
 ### Review held-back songs on a home-network web page
 
 Accepted 2026-10-13. An always-running LaunchAgent serves the review page at
@@ -503,7 +516,8 @@ explicitly approved them.
   Music.app and matched again. On 2026-10-13 the first release was found to
   have accepted four DJ-mix versions ("(Mixed)" titles from "(DJ Mix)"
   albums). The updated matcher rejects these. Music.app replaced them in
-  "Alt 102.1" on 2026-10-13, once its access was approved.
+  "Alt 102.1" on 2026-10-13, once its access was approved. Each sync also
+  matches any held song whose stored candidates the current rules accept.
 - **Apple sign-in:** the dashboard's `/auth` page runs MusicKit JS and
   accepts only loopback requests, so it's opened at `http://localhost:8102/auth`
   on the Mac mini. That page receives a developer token, which shouldn't

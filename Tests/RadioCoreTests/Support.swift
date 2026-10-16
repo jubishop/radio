@@ -1,7 +1,9 @@
 import CryptoKit
 import Foundation
 import RadioCore
+import SQLite3
 import Synchronization
+import Testing
 
 /// An HTTP client that answers from registered routes and records requests.
 final class FakeHTTP: HTTPClient {
@@ -31,6 +33,16 @@ final class FakeHTTP: HTTPClient {
             return state.routes.last(where: { line.hasPrefix($0.prefix) })?.respond
         }
         return responder?(request) ?? HTTPResponse(status: 404, body: Data("no route for \(line)".utf8))
+    }
+}
+
+/// Changes a test database directly, to set up what an earlier release stored.
+func executeSQL(_ statements: [String], in home: RadioHome) {
+    var db: OpaquePointer?
+    #expect(sqlite3_open(home.directory.appendingPathComponent("radio.sqlite").path, &db) == SQLITE_OK)
+    defer { sqlite3_close(db) }
+    for statement in statements {
+        #expect(sqlite3_exec(db, statement, nil, nil, nil) == SQLITE_OK, "\(statement)")
     }
 }
 
