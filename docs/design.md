@@ -413,8 +413,9 @@ Accepted 2026-10-15. The user asked the review page to show everything Jev or
 they decided, so any of it can be undone, with what needs them at the top.
 From top to bottom, the page lists songs needing review, each with Jev's
 suggestion when it has one, then every song Jev or the user matched, newest
-decision first. Songs the user ignored are in that list too, so an ignore can
-be undone; the user hasn't confirmed this part. Automatic matches aren't
+decision first. Songs the user ignored, meaning never add and never ask
+again, are in that list too, so an ignore can be undone without Terminal. The
+user agreed to this the same day. Automatic matches aren't
 listed, since there were 539 of them.
 
 Undo puts a song back at the top of the page at once. When the song was
