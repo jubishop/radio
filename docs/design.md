@@ -467,6 +467,21 @@ shows the review queue and health: last poll, last sync, and Apple Music
 sign-in status. The page refreshes itself. Public hosting was deferred
 because it would add a service to deploy, secure, and keep in sync.
 
+### Color the dashboard by meaning
+
+Accepted 2026-10-15. The user asked for green to mean all is well, red to
+mean something needs them, and other colors for everything else, with more
+variety than black, white, red, and green. Green marks a connected Apple
+Music and an empty review queue. Red marks songs to review, failures, and
+each song waiting on the review page. Links are blue, buttons are indigo, Jev's
+suggestions and picks are purple, playlist links and "in playlist" are teal,
+and "waiting to sync" is amber.
+
+Each station takes one of eight colors from its ID and keeps it on every
+page, as a stripe on its dashboard card and as tags on the playlist pages.
+Colors from a hash of the station's name would likely have given two of the
+five stations the same color.
+
 ### Show each song's stations and latest play
 
 Accepted 2026-10-13. The user asked for each song's stations and latest play

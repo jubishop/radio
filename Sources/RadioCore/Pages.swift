@@ -8,9 +8,9 @@ enum Pages {
             <header>
               <h1>Radio</h1>
               <p class="health">\(appleMusic(status.appleMusic, signInURL: signInURL))
-                · \(review(count: status.heldCount))
-                · \(playlists(status))
-                · Last sync \(status.lastSyncAt.map { escape(displayTime($0)) } ?? "never")</p>
+                \(review(count: status.heldCount))
+                \(playlists(status))
+                <span class="pill">Last sync \(status.lastSyncAt.map { escape(displayTime($0)) } ?? "never")</span></p>
             """
         if let error = status.lastSyncError {
             body += "<p class=\"problem\">Last sync failed: \(escape(error))</p>"
@@ -34,20 +34,20 @@ enum Pages {
     private static func appleMusic(_ state: AppleMusicState, signInURL: String) -> String {
         switch state {
         case .notConfigured:
-            return "<span class=\"bad\">Apple Music not set up</span> (run <code>radio credentials set</code>)"
+            return "<span class=\"pill bad\">Apple Music not set up · run <code>radio credentials set</code></span>"
         case .needsSignIn:
-            return "<span class=\"bad\">Apple Music sign-in needed</span> (open <code>\(escape(signInURL))</code> on the Mac mini)"
+            return "<span class=\"pill bad\">Apple Music sign-in needed · open <code>\(escape(signInURL))</code> on the Mac mini</span>"
         case .rejected(let since):
-            return "<span class=\"bad\">Apple Music sign-in expired \(escape(displayTime(since)))</span> (open <code>\(escape(signInURL))</code> on the Mac mini)"
+            return "<span class=\"pill bad\">Apple Music sign-in expired \(escape(displayTime(since))) · open <code>\(escape(signInURL))</code> on the Mac mini</span>"
         case .connected(let storefront, _):
-            return "<span class=\"good\">Apple Music connected</span> (\(escape(storefront.uppercased())))"
+            return "<span class=\"pill good\">Apple Music connected · \(escape(storefront.uppercased()))</span>"
         }
     }
 
     private static func playlists(_ status: RadioStatus) -> String {
         let songs = "\(status.playlistCount) song\(status.playlistCount == 1 ? "" : "s")"
-        return "<a href=\"\(path(of: .recent))\">\(songs) in \(escape(Radio.playlistName))</a>, "
-            + "<a href=\"\(path(of: .archive))\">\(status.archiveCount) in \(escape(Radio.archivePlaylistName))</a>"
+        return "<a class=\"pill playlist\" href=\"\(path(of: .recent))\">\(songs) in \(escape(Radio.playlistName))</a>\n"
+            + "<a class=\"pill playlist\" href=\"\(path(of: .archive))\">\(status.archiveCount) in \(escape(Radio.archivePlaylistName))</a>"
     }
 
     /// Where the dashboard lists a playlist's songs.
@@ -73,8 +73,8 @@ enum Pages {
             body += "<ol>"
             for entry in entries {
                 let time = entry.latestPlay.map { "<time>\(escape(shortTime($0)))</time> " } ?? ""
-                let stations = entry.stations.map { $0.plays > 1 ? "\($0.name) ×\($0.plays)" : $0.name }.joined(separator: ", ")
-                body += "<li>\(time)\(link(entry.url, "\(entry.artist) – \(entry.title)")) <span class=\"meta\">\(escape(stations))</span></li>"
+                let stations = entry.stations.map(tag).joined(separator: " ")
+                body += "<li>\(time)\(link(entry.url, "\(entry.artist) – \(entry.title)")) \(stations)</li>"
             }
             body += "</ol>"
         }
@@ -83,10 +83,23 @@ enum Pages {
 
     /// Links to the review page even with nothing waiting, since it also
     /// lists past decisions to undo.
+    /// A station's name and how often it played the song, in its color.
+    private static func tag(_ station: StationPlays) -> String {
+        let plays = station.plays > 1 ? " ×\(station.plays)" : ""
+        return "<span class=\"tag \(color(ofStation: station.stationID))\">\(escape(station.name))\(plays)</span>"
+    }
+
+    /// One of eight colors, chosen by the station's ID so each station keeps
+    /// its color on every page.
+    private static func color(ofStation id: Int64) -> String {
+        "s\((id - 1) % 8)"
+    }
+
+    /// Green when nothing waits for the user and red when songs do.
     private static func review(count: Int) -> String {
         count == 0
-            ? "<a href=\"/review\" class=\"good\">No songs to review</a>"
-            : "<a href=\"/review\" class=\"bad\">\(count) song\(count == 1 ? "" : "s") to review</a>"
+            ? "<a class=\"pill good\" href=\"/review\">No songs to review</a>"
+            : "<a class=\"pill bad\" href=\"/review\">\(count) song\(count == 1 ? "" : "s") to review</a>"
     }
 
     private static func station(_ summary: StationSummary) -> String {
@@ -100,8 +113,7 @@ enum Pages {
             feed = "Feed not read yet"
         }
         var html = """
-            <section>
-              <h2>\(escape(station.name))</h2>
+            <section class="station \(color(ofStation: station.id))"><h2>\(escape(station.name))</h2>
               <p class="meta">\(feed) · \(summary.playCount) plays logged</p>
             """
         if let latest = summary.recentPlays.first {
@@ -126,8 +138,8 @@ enum Pages {
 
     private static func badge(_ state: PlayEntry.State) -> String {
         switch state {
-        case .added: "<span class=\"badge good\">in playlist</span>"
-        case .waiting: "<span class=\"badge\">waiting to sync</span>"
+        case .added: "<span class=\"badge playlist\">in playlist</span>"
+        case .waiting: "<span class=\"badge waiting\">waiting to sync</span>"
         case .held: "<a class=\"badge bad\" href=\"/review\">needs review</a>"
         case .ignored: "<span class=\"badge\">ignored</span>"
         }
@@ -146,7 +158,7 @@ enum Pages {
         }
         body += "<h2 class=\"group\">Needs your review</h2>"
         if songs.isEmpty {
-            body += "<p class=\"empty\">Nothing to review.</p>"
+            body += "<p class=\"empty good\">Nothing to review.</p>"
         }
         for song in songs {
             body += heldSong(song)
@@ -165,7 +177,7 @@ enum Pages {
     private static func heldSong(_ song: HeldSong) -> String {
         let plays = "\(song.playCount) play\(song.playCount == 1 ? "" : "s")"
         var html = """
-            <section>
+            <section class="held">
               <h2>\(escape(song.artist)) – \(escape(song.title))</h2>
               <p class="meta">\(plays) on \(escape(song.stations.joined(separator: ", "))) · last \(escape(displayTime(song.lastPlayedAt))) · <code>radio match \(song.id)</code></p>
             """
@@ -207,7 +219,7 @@ enum Pages {
             <li><form method="post" action="/review/\(song.id)/match">
               <input type="hidden" name="candidate" value="\(index)">
               <button\(quiet)>Use \(candidateLetter(index))</button>
-              \(link(candidate.url, "\(candidate.artistName) – \(candidate.name)"))\(explicit)\(isPick ? " <span class=\"badge good\">Jev's pick</span>" : "")
+              \(link(candidate.url, "\(candidate.artistName) – \(candidate.name)"))\(explicit)\(isPick ? " <span class=\"badge jev\">Jev's pick</span>" : "")
               <span class="meta">\(escape(candidate.albumName))</span>
             </form></li>
             """
@@ -215,9 +227,9 @@ enum Pages {
 
     private static func reviewedSong(_ song: ReviewedSong) -> String {
         let label = switch song.decision {
-        case .jev(let value, let model): "Matched by Jev · \(score(value)) · \(escape(model))"
-        case .manual: "Matched by you"
-        case .ignored: "Ignored by you"
+        case .jev(let value, let model): "<span class=\"by jev\">Matched by Jev</span> · \(score(value)) · \(escape(model))"
+        case .manual: "<span class=\"by you\">Matched by you</span>"
+        case .ignored: "<span class=\"by\">Ignored by you</span>"
         }
         let pick = song.catalog.map { " → " + link($0.url, "\($0.artistName) – \($0.name)") } ?? ""
         return """
@@ -320,32 +332,55 @@ enum Pages {
         \(refresh ? "<meta http-equiv=\"refresh\" content=\"60\">" : "")
         <title>\(escape(title))</title>
         <style>
-        :root { color-scheme: light dark; --text: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --bg: #fbfbfd;
-          --card: #fff; --good: #1a7f37; --bad: #c2410c; --accent: #fa2d48; }
-        @media (prefers-color-scheme: dark) { :root { --text: #f5f5f7; --muted: #a1a1a6; --line: #3a3a3c;
-          --bg: #111113; --card: #1c1c1e; --good: #3fb950; --bad: #f0883e; } }
+        :root { color-scheme: light dark; --text: #1f2328; --muted: #656d76; --line: #e1e4ea; --bg: #f4f5f9; --card: #fff;
+          --good: #1a7f37; --bad: #d1242f; --link: #0969da; --action: #4f46e5; --jev: #8250df; --playlist: #0e7c86; --waiting: #9a6700;
+          --s0: #2563eb; --s1: #c026d3; --s2: #d97706; --s3: #7c3aed; --s4: #0891b2; --s5: #db2777; --s6: #a16207; --s7: #64748b; }
+        @media (prefers-color-scheme: dark) { :root { --text: #e6edf3; --muted: #9198a1; --line: #2d333b; --bg: #0d1117; --card: #161b22;
+          --good: #3fb950; --bad: #ff6b6b; --link: #58a6ff; --action: #6366f1; --jev: #bc8cff; --playlist: #39c5cf; --waiting: #e3b341;
+          --s0: #60a5fa; --s1: #e879f9; --s2: #fbbf24; --s3: #a78bfa; --s4: #22d3ee; --s5: #f472b6; --s6: #d4a24c; --s7: #94a3b8; } }
         * { box-sizing: border-box; }
-        body { margin: 0 auto; max-width: 1100px; padding: 16px; font: 15px/1.45 -apple-system, system-ui, sans-serif;
-          color: var(--text); background: var(--bg); }
-        h1 { margin: 0 0 4px; font-size: 28px; } h2 { margin: 0 0 4px; font-size: 20px; }
+        html { background: radial-gradient(900px 320px at 0% 0%, color-mix(in srgb, var(--jev) 12%, transparent), transparent),
+          radial-gradient(900px 320px at 100% 0%, color-mix(in srgb, var(--playlist) 12%, transparent), transparent) var(--bg); }
+        body { margin: 0 auto; max-width: 1100px; padding: 16px; font: 15px/1.45 -apple-system, system-ui, sans-serif; color: var(--text); }
+        h1 { margin: 0 0 4px; font-size: 30px; width: fit-content; color: transparent; -webkit-background-clip: text; background-clip: text;
+          background-image: linear-gradient(90deg, var(--jev), var(--link) 55%, var(--playlist)); }
+        h2 { margin: 0 0 4px; font-size: 20px; }
         h3 { margin: 12px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-        a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+        a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
         section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; }
-        .meta, .health, .empty, time { color: var(--muted); }
-        .good { color: var(--good); } .bad { color: var(--bad); }
-        .problem { color: var(--bad); } .notice { padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--card); }
+        .meta, .empty, time { color: var(--muted); }
+        .pill, .badge, .tag, .by { --c: var(--muted); color: var(--c); }
+        .pill, .badge, .tag { background: color-mix(in srgb, var(--c) 13%, transparent); border-radius: 12px; }
+        .pill { padding: 3px 10px; font-size: 14px; overflow-wrap: anywhere; }
+        .badge, .tag { padding: 1px 7px; font-size: 12px; white-space: nowrap; }
+        a.pill:hover, a.badge:hover { text-decoration: none; background: color-mix(in srgb, var(--c) 24%, transparent); }
+        .health { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+        .s0 { --station: var(--s0); } .s1 { --station: var(--s1); } .s2 { --station: var(--s2); } .s3 { --station: var(--s3); }
+        .s4 { --station: var(--s4); } .s5 { --station: var(--s5); } .s6 { --station: var(--s6); } .s7 { --station: var(--s7); }
+        .tag { --c: var(--station); }
+        .good { --c: var(--good); color: var(--c); } .bad { --c: var(--bad); color: var(--c); } .jev { --c: var(--jev); color: var(--c); }
+        .you { --c: var(--link); } .playlist { --c: var(--playlist); } .waiting { --c: var(--waiting); } .by { font-weight: 600; }
+        .station { border-top: 4px solid var(--station);
+          background: linear-gradient(color-mix(in srgb, var(--station) 8%, var(--card)), var(--card) 120px); }
+        .station h2::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%;
+          background: var(--station); vertical-align: middle; }
+        .held { border-left: 4px solid var(--bad); }
+        .problem, .notice { padding: 8px 12px; border-radius: 8px; }
+        .problem { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+        .notice { border-left: 3px solid var(--link); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--link) 10%, var(--card)); }
+        .suggestion { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--jev) 10%, transparent); }
+        .suggestion strong { color: var(--jev); }
         .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
         @media (max-width: 720px) { .columns { grid-template-columns: 1fr; } }
         ol { list-style: none; padding: 0; margin: 0; } li { padding: 4px 0; border-top: 1px solid var(--line); }
         time { display: inline-block; min-width: 5.5em; font-variant-numeric: tabular-nums; }
-        .badge { font-size: 12px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-        .badge.good { color: var(--good); border-color: currentColor; } .badge.bad { color: var(--bad); border-color: currentColor; }
         .candidates li { padding: 8px 0; } .row { display: flex; gap: 8px; margin-top: 8px; }
-        h2.group { margin: 28px 0 0; } .suggestion { margin: 8px 0; }
+        h2.group { margin: 28px 0 0; }
         details summary { margin-top: 8px; color: var(--muted); cursor: pointer; }
         .reviewed form { display: flex; align-items: center; gap: 12px; } .reviewed form div { flex: 1; min-width: 0; }
-        input { flex: 1; min-width: 0; padding: 6px 8px; font: inherit; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
-        button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+        input { flex: 1; min-width: 0; padding: 6px 8px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+        button { font: inherit; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--action); background: var(--action); color: #fff; cursor: pointer; }
+        button:hover { filter: brightness(1.1); }
         button.quiet { background: none; color: var(--muted); border-color: var(--line); }
         button:disabled { opacity: .5; cursor: default; }
         code { font: 13px ui-monospace, SFMono-Regular, monospace; }

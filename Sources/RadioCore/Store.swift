@@ -88,6 +88,7 @@ struct PlaylistEntry {
 
 /// One station's plays of a song.
 struct StationPlays {
+    var stationID: Int64
     var name: String
     var plays: Int
     var latestPlay: Date
@@ -878,7 +879,7 @@ final class Store {
         var stations: [String: [StationPlays]] = [:]
         for row in try db.query(
             """
-            SELECT s.catalog_id, st.name, COUNT(*) AS play_count, MAX(p.played_at) AS latest_played
+            SELECT s.catalog_id, st.id AS station_id, st.name, COUNT(*) AS play_count, MAX(p.played_at) AS latest_played
             FROM playlist_tracks t
             JOIN songs s ON s.catalog_id = t.catalog_id AND s.status = 'matched'
             JOIN plays p ON p.song_id = s.id JOIN stations st ON st.id = p.station_id
@@ -888,7 +889,7 @@ final class Store {
             [.text(kind.rawValue)]
         ) {
             stations[row.string("catalog_id")!, default: []].append(StationPlays(
-                name: row.string("name")!, plays: Int(row.int("play_count")!),
+                stationID: row.int("station_id")!, name: row.string("name")!, plays: Int(row.int("play_count")!),
                 latestPlay: parseISODate(row.string("latest_played")!)!
             ))
         }

@@ -28,20 +28,44 @@ import Testing
 
         #expect(page.contains("<h2>Alt 102.1</h2>"))
         #expect(page.contains("Latest: <strong>Tom &amp; Jerry &lt;Band&gt; – Unmatched Song</strong>"))
-        #expect(page.contains("Apple Music connected"))
-        #expect(page.contains("1 song to review"))
+        #expect(page.contains(#"<span class="pill good">Apple Music connected · US</span>"#))
+        #expect(page.contains(#"<a class="pill bad" href="/review">1 song to review</a>"#))
         #expect(page.contains("in playlist"))
-        #expect(page.contains(#"<a href="/playlists/radio">1 song in Radio</a>, <a href="/playlists/archive">1 in Radio Archive</a>"#))
+        #expect(page.contains(#"<a class="pill playlist" href="/playlists/radio">1 song in Radio</a>"#))
+        #expect(page.contains(#"<a class="pill playlist" href="/playlists/archive">1 in Radio Archive</a>"#))
     }
 
     /// The review page also lists past decisions to undo, so the user asked
-    /// on 2026-10-15 for the dashboard to link to it with nothing waiting.
-    @Test func theDashboardLinksToTheReviewPageWithNothingToReview() async throws {
+    /// on 2026-10-15 for the dashboard to link to it with nothing waiting,
+    /// and for green to mean all is well.
+    @Test func nothingToReviewLinksToTheReviewPageInGreen() async throws {
+        let dashboard = Dashboard(radio: try Harness().radio)
+
+        let home = text(await dashboard.handle(request("GET", "/")))
+        let review = text(await dashboard.handle(request("GET", "/review")))
+
+        #expect(home.contains(#"<a class="pill good" href="/review">No songs to review</a>"#))
+        #expect(review.contains(#"<p class="empty good">Nothing to review.</p>"#))
+    }
+
+    /// The user asked on 2026-10-15 for more color than black, white, red,
+    /// and green. Each station keeps one color, from its ID, on every page.
+    @Test func eachStationKeepsItsColorAcrossPages() async throws {
         let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        _ = try await harness.radio.addStation(slug: "rock")
+        harness.music.addToCatalog("Rise Against", "Savior")
+        harness.play("Rise Against", "Savior", on: "101-2000")
+        _ = try await harness.radio.run()
+        let dashboard = Dashboard(radio: harness.radio)
 
-        let page = text(await Dashboard(radio: harness.radio).handle(request("GET", "/")))
+        let home = text(await dashboard.handle(request("GET", "/")))
+        let radio = text(await dashboard.handle(request("GET", "/playlists/radio")))
 
-        #expect(page.contains(#"<a href="/review" class="good">No songs to review</a>"#))
+        #expect(home.contains(#"<section class="station s0"><h2>Alt 102.1</h2>"#))
+        #expect(home.contains(#"<section class="station s1"><h2>Rock 99</h2>"#))
+        #expect(radio.contains(#"<span class="tag s1">Rock 99</span>"#))
     }
 
     @Test func eachPlaylistsPageListsItsSongsWithTheStationsThatPlayedThem() async throws {
@@ -71,7 +95,7 @@ import Testing
         let hit = try #require(archive.range(of: "Tom &amp; Jerry – &lt;Hit&gt;"))
         let saviorLink = try #require(archive.range(of: #"<a href="\#(savior.url)" target="_blank" rel="noopener">Rise Against – Savior</a>"#))
         #expect(hit.lowerBound < saviorLink.lowerBound)
-        #expect(archive.contains("Rock 99, Alt 102.1 ×2"))
+        #expect(archive.contains(#"<span class="tag s1">Rock 99</span> <span class="tag s0">Alt 102.1 ×2</span>"#))
         #expect(missing.status == 404)
     }
 
