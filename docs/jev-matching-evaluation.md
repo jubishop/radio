@@ -31,13 +31,14 @@ recording as right; see [Observations](#observations).
 Two question designs were compared on `jev-1.13.0` and `jev-1.14.0`:
 
 - **Choice:** one Choice question per song, with an option for each candidate
-  and a "none" option.
+  and a "none" option. Radio uses this, with copies of one recording
+  collapsed first; see [Collapsing copies](#collapsing-copies). The wording
+  is in `Sources/RadioCore/Jev.swift`.
 - **Noul:** one yes/no question per candidate, asking whether it's the
-  recording the station played. This is what Radio uses; the wording is in
-  `Sources/RadioCore/Jev.swift`.
+  recording the station played. Radio used this first.
 
-The 736 requests used about one million input tokens, roughly $0.04 at the
-listed price.
+The first 736 requests used about one million input tokens, roughly $0.04 at
+the listed price.
 
 ## Results
 
@@ -63,13 +64,43 @@ added a song in 3 trap cases. With the Noul design, no wrong candidate scored
 above 0.46 on 1.13 or 0.58 on 1.14, and the median right pick scored 0.92 on
 1.13 and 0.95 on 1.14.
 
+## Collapsing copies
+
+Most search results list the right recording more than once: on its album,
+its single, and compilations. That was true in 89 of the 102 cases where it
+was listed. A Choice question spreads its probability over those copies, so
+with several copies only 24 of 89 cases had one copy at 0.9 or higher on 1.14.
+Apple's catalog gives every song an ISRC, which identifies the recording. Of
+23 copies checked across 5 songs, most shared their recording's ISRC, but a
+clean edit has its own, and a few copies were other takes or a trimmed edit
+under the same title.
+
+So the Choice question was tested again with copies collapsed into one option
+each: those sharing an ISRC, or with the same title and artist and lengths
+within three seconds, unless one is a live or remixed version with another
+title. Options per song fell from up to ten to about seven.
+
+| Choice with copies collapsed, model | Bar | Added | Wrong added | Traps added | Tokens per song |
+| --- | --- | --- | --- | --- | --- |
+| 1.14 | 0.8 | 91 | 0 | 0 | 796 |
+| 1.14 | 0.9 | 80 | 0 | 0 | 796 |
+| 1.13 | 0.9 | 78 | 0 | 0 | 778 |
+
+The 1.13 row used a slightly looser collapse rule that didn't keep live takes
+and remixes apart. The Noul design used 2,239 tokens per song. On 1.14, the
+highest wrong option in a trap case scored 0.66, and the highest Choice
+probability for the Bad Omens original was 0.79. Of the 19 hard cases, 7 would
+be added at the 0.9 bar and 8 more suggested at the 0.6 bar.
+
 ## Observations
 
-- The one wrong addition in every row is Bad Omens' "Death Of Peace Of Mind".
+- The one wrong addition in every row of the first table is Bad Omens' "Death
+  Of Peace Of Mind".
   Jev picked the band's own recording, scoring it 0.90, where the user had
   picked Daughtry's cover. The user then asked for the original.
-- On 1.14, 7 of the 19 hard cases (the manual picks and held songs) would be
-  added at the 0.9 bar, Bad Omens aside, and 4 more suggested at the 0.6 bar.
+- With the Noul design on 1.14, 7 of the 19 hard cases (the manual picks and
+  held songs) would be added at the 0.9 bar, Bad Omens aside, and 4 more
+  suggested at the 0.6 bar.
   These songs are harder than automatic matches, since the matching rules
   failed on them.
 - For "The Man Who Sold The World", 1.13's best guess, at 0.52, was a 1993 Los

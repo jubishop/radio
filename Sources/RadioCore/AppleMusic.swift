@@ -137,6 +137,8 @@ public struct AppleMusicClient: Sendable {
             let albumName: String?
             let url: String?
             let contentRating: String?
+            let isrc: String?
+            let durationInMillis: Int?
         }
         let id: String
         let attributes: Attributes?
@@ -148,7 +150,9 @@ public struct AppleMusicClient: Sendable {
                 artistName: attributes?.artistName ?? "",
                 albumName: attributes?.albumName ?? "",
                 url: attributes?.url ?? "",
-                isExplicit: attributes?.contentRating == "explicit"
+                isExplicit: attributes?.contentRating == "explicit",
+                isrc: attributes?.isrc,
+                durationMillis: attributes?.durationInMillis
             )
         }
     }

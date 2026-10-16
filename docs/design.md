@@ -360,21 +360,24 @@ the 15 earlier manual picks.
 ### Let Jev resolve held-back songs
 
 Accepted 2026-10-15 (td-810dd1). Each sync asks TypeSafe's Jev about every
-held song it hasn't judged, with one yes/no question per Apple Music
-candidate: is this the recording the station played? Held songs now keep the
-top ten candidates instead of three. The review page shows three and folds
-the rest away, keeping Jev's pick in view.
+held song it hasn't judged, with one Choice question: which of these
+recordings did the station play, or none of them? Held songs now keep the
+top ten Apple Music candidates instead of three. The review page shows three
+and folds the rest away, keeping Jev's pick in view.
 
-- **Score 0.9 or higher:** Radio adds that candidate, as matched by Jev. Among
-  the candidates scoring that high, it prefers an explicit version, then the
-  first in Apple's search order. Those are usually copies of one recording
-  that score about the same, and Apple lists the original release first. The
-  user agreed to this on 2026-10-15, after Jev's first live pick, Usher's "DJ
-  Got Us Fallin' In Love", went to a trimmed copy on a compilation instead of
-  the EP.
-- **From 0.6 up to 0.9:** the review page and `radio unmatched` show it as
-  Jev's suggestion.
-- **Below 0.6:** the song waits for review as before.
+Before asking, Radio collapses copies of one recording into a single option,
+since search results often list a recording on its album, its single, and
+compilations. Copies share an ISRC, or have the same title and artist with
+lengths within three seconds, which also pairs a clean edit, whose ISRC
+differs, with its explicit original. A live or remixed copy must match the
+full title too, so a live take and a remix stay apart.
+
+- **Probability 0.9 or higher:** Radio adds that recording, as matched by
+  Jev, using its explicit copy, or else its first in Apple's search order,
+  which is usually the original release.
+- **From 0.6 up to 0.9:** the review page and `radio unmatched` show that copy
+  as Jev's suggestion.
+- **Below 0.6, or "none":** the song waits for review as before.
 
 Jev judges each held song once. When a request fails, the song waits for the
 next sync and the dashboard shows the error. Without `JEV_API_KEY` in the env
@@ -382,8 +385,18 @@ file, Radio doesn't ask Jev.
 
 After seeing the [evaluation](jev-matching-evaluation.md), the user chose the
 newest model, jev-1.14.0, with the 0.9 bar, then set the suggestion bar to
-0.6. The user also asked Radio to always use the newest model instead of a
-pinned version, so Radio sends `jev-preview`, TypeSafe's alias for its newest
+0.6. Radio first asked one yes/no question per candidate, the design that
+scored best before copies were collapsed. Its first live pick, Usher's "DJ Got
+Us Fallin' In Love", went to a trimmed copy on a compilation instead of the
+EP, because copies of one recording scored about the same. The user preferred
+a Choice question, which fits picking one recording, and asked to give Jev
+only the options it needs. With copies collapsed, the Choice question added
+80 of 102 right recordings at the 0.9 bar against 86 for the yes/no design,
+added no wrong song or trap in either, and used about a third of the tokens.
+The user chose it on 2026-10-15.
+
+The user also asked Radio to always use the newest model instead of a pinned
+version, so Radio sends `jev-preview`, TypeSafe's alias for its newest
 release, official or preview. `jev-latest`, the newest official release, was
 jev-1.13.0 then. The tradeoff is that scores can shift when the alias moves,
 with no change to Radio, while the bars were measured on jev-1.14.0. Radio

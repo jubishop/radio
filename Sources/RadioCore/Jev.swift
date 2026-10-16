@@ -1,15 +1,15 @@
 import Foundation
 
-/// The scores Jev gave a held song's candidates, and the model that answered.
+/// How likely Jev thinks each recording offered is to be the one the station
+/// played, in the order offered, and the model that answered.
 struct JevVerdict {
     var model: String
     var scores: [Double]
 }
 
-/// Asks TypeSafe's Jev, with one yes/no question per candidate, how likely
-/// each Apple Music candidate is to be the recording a station played. The
-/// wording is what the 2026-10-15 evaluation measured; see
-/// docs/jev-matching-evaluation.md.
+/// Asks TypeSafe's Jev one Choice question: which of the recordings offered,
+/// or none of them, is the one a station played. The wording is what the
+/// 2026-10-15 evaluation measured; see docs/jev-matching-evaluation.md.
 struct Jev {
     /// TypeSafe's newest release, preview or official. The user chose to
     /// follow it rather than pin a version.
@@ -24,23 +24,23 @@ struct Jev {
     let http: HTTPClient
     let apiKey: String
 
-    func judge(station: String, artist: String, title: String, candidates: [CatalogSong]) async throws -> JevVerdict {
-        var questions: [String: Any] = [:]
-        for (index, candidate) in candidates.enumerated() {
-            questions["c\(index)"] = [
-                "type": "noul",
-                "instructions": [
-                    "question": "Is `candidate` the recording the station played, as `played` reports it?",
-                    "candidate": ["artist": candidate.artistName, "title": candidate.name, "album": candidate.albumName],
-                    "feed_text": Self.feedText,
-                ],
-                "criteria": ["true": "The same song by the same artist, in the version the station played.", "false": Self.notIt],
-            ]
+    /// `recordings` offers one copy of each recording.
+    func judge(station: String, artist: String, title: String, recordings: [CatalogSong]) async throws -> JevVerdict {
+        var criteria: [String: Any] = ["none": "None of the songs above is that recording. Each one is: " + Self.notIt]
+        for (index, recording) in recordings.enumerated() {
+            criteria[candidateLetter(index)] = ["artist": recording.artistName, "title": recording.name, "album": recording.albumName]
         }
         let body: [String: Any] = [
             "model": Self.model,
             "state": ["station": station, "played": ["artist": artist, "title": title]],
-            "questions": questions,
+            "questions": ["pick": [
+                "type": "choice",
+                "instructions": [
+                    "question": "Which Apple Music song is the recording the station played, as `played` reports it?",
+                    "feed_text": Self.feedText,
+                ],
+                "criteria": criteria,
+            ]],
         ]
         let request = HTTPRequest(
             method: "POST", url: Self.url,
@@ -49,13 +49,10 @@ struct Jev {
         )
         let data = try await http.send(request).requireSuccess(for: Self.url)
         let response = try JSONDecoder().decode(Response.self, from: data)
-        let scores = try candidates.indices.map { index in
-            guard let score = response.answers["c\(index)"]?.noul else {
-                throw RadioError("Jev didn't answer about candidate \(candidateLetter(index))")
-            }
-            return score
+        guard let probabilities = response.answers["pick"]?.probabilities else {
+            throw RadioError("Jev didn't answer which recording it was")
         }
-        return JevVerdict(model: response.model, scores: scores)
+        return JevVerdict(model: response.model, scores: recordings.indices.map { probabilities[candidateLetter($0)] ?? 0 })
     }
 
     private struct Response: Decodable {
@@ -63,7 +60,7 @@ struct Jev {
         let answers: [String: Answer]
 
         struct Answer: Decodable {
-            let noul: Double?
+            let probabilities: [String: Double]?
         }
     }
 }

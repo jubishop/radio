@@ -160,8 +160,9 @@ final class FakeHubbard: Sendable {
     }
 }
 
-/// TypeSafe's System One endpoint, answering Jev's per-candidate questions
-/// with the score set for each candidate title, 0 unless set.
+/// TypeSafe's System One endpoint, answering Jev's Choice question with the
+/// probability set for each option's title, 0 unless set, and the rest on
+/// "none".
 final class FakeJev: Sendable {
     private let scores = Mutex<[String: Double]>([:])
     private let failing = Mutex(false)
@@ -173,9 +174,15 @@ final class FakeJev: Sendable {
             let questions = body["questions"] as? [String: [String: Any]] ?? [:]
             var answers: [String: Any] = [:]
             for (id, question) in questions {
-                let candidate = (question["instructions"] as? [String: Any])?["candidate"] as? [String: Any]
-                let title = candidate?["title"] as? String ?? ""
-                answers[id] = ["type": "noul", "noul": scores.withLock { $0[title] } ?? 0]
+                let criteria = question["criteria"] as? [String: Any] ?? [:]
+                var probabilities: [String: Double] = [:]
+                for (option, value) in criteria where option != "none" {
+                    let title = (value as? [String: Any])?["title"] as? String ?? ""
+                    probabilities[option] = scores.withLock { $0[title] } ?? 0
+                }
+                probabilities["none"] = max(0, 1 - probabilities.values.reduce(0, +))
+                let choice = probabilities.max { $0.value < $1.value }?.key ?? "none"
+                answers[id] = ["type": "choice", "choice": choice, "probabilities": probabilities, "confidence": 0.5]
             }
             return json(["model": "jev-1.14.0", "answers": answers, "usage": ["input_tokens": 100, "output_tokens": 10]])
         }
@@ -278,11 +285,16 @@ final class FakeAppleMusic: Sendable {
     }
 
     @discardableResult
-    func addToCatalog(_ artist: String, _ title: String, album: String = "Album", explicit: Bool = false) -> CatalogSong {
+    /// Each song gets its own ISRC and a length seven seconds from the last
+    /// one's, so it's a separate recording unless the test says otherwise.
+    func addToCatalog(_ artist: String, _ title: String, album: String = "Album", explicit: Bool = false,
+                      isrc: String? = nil, seconds: Int? = nil) -> CatalogSong {
         catalog.withLock { catalog in
+            let id = 1_000_000 + catalog.count
             let song = CatalogSong(
-                id: String(1_000_000 + catalog.count), name: title, artistName: artist, albumName: album,
-                url: "https://music.apple.com/us/album/x/1?i=\(1_000_000 + catalog.count)", isExplicit: explicit
+                id: String(id), name: title, artistName: artist, albumName: album,
+                url: "https://music.apple.com/us/album/x/1?i=\(id)", isExplicit: explicit,
+                isrc: isrc ?? "TEST\(id)", durationMillis: (seconds ?? 180 + catalog.count * 7) * 1000
             )
             catalog.append(song)
             return song
@@ -430,6 +442,7 @@ final class FakeAppleMusic: Sendable {
         ["id": song.id, "type": "songs", "attributes": [
             "name": song.name, "artistName": song.artistName, "albumName": song.albumName,
             "url": song.url, "contentRating": song.isExplicit ? "explicit" : "clean",
+            "isrc": song.isrc ?? "", "durationInMillis": song.durationMillis ?? 0,
         ]]
     }
 }

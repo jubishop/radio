@@ -96,40 +96,70 @@ import Testing
         #expect(try await harness.radio.heldSongs().count == 1)
     }
 
-    @Test func theExplicitVersionIsPreferredAmongSurePicks() async throws {
+    /// Apple gives a clean edit its own ISRC, so it's matched to its explicit
+    /// original by title, artist, and length.
+    @Test func aCleanEditIsOneOptionWithItsExplicitOriginal() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
-        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On (Amended LP Version)")
-        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On", explicit: true)
+        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On (Amended LP Version)", seconds: 237)
+        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On", explicit: true, seconds: 236)
         harness.jev.score("Get Ur Freak On (Amended LP Version)", 0.96)
-        harness.jev.score("Get Ur Freak On", 0.91)
         harness.play("Missy Elliot", "GET UR FREAK ON")
 
         _ = try await harness.radio.run()
 
+        #expect(try options(in: harness).count == 1)
         #expect(harness.music.playlists()["Radio"] == ["Get Ur Freak On"])
     }
 
-    /// Copies of one recording score about the same, so the first in Apple's
-    /// search order, usually the original release, wins. Seen 2026-10-15:
-    /// Usher went to a trimmed copy on a compilation instead of the EP.
-    @Test func theFirstSurePickInSearchOrderWins() async throws {
+    /// Seen 2026-10-15: Usher went to a trimmed copy on a compilation instead
+    /// of the EP. Copies sharing an ISRC are one option, and the first in
+    /// Apple's search order, usually the original release, is added.
+    @Test func copiesOfOneRecordingAreOneOptionAndTheFirstIsAdded() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
-        let original = harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On", album: "Miss E... So Addictive")
-        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On (Party Hits)", album: "Party Hits")
+        let original = harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On", album: "Miss E... So Addictive",
+                                                  isrc: "USEW20100037", seconds: 236)
+        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On (Party Hits)", album: "Party Hits",
+                                   isrc: "USEW20100037", seconds: 230)
         harness.jev.score("Get Ur Freak On", 0.91)
-        harness.jev.score("Get Ur Freak On (Party Hits)", 0.93)
         harness.play("Missy Elliot", "GET UR FREAK ON")
 
         _ = try await harness.radio.run()
 
+        #expect(try options(in: harness).count == 1)
         #expect(try await harness.radio.reviewedSongs().first?.catalog?.id == original.id)
     }
 
-    @Test func jevIsAskedAboutEveryCandidateWithTheNewestModel() async throws {
+    @Test func otherVersionsOfASongAreSeparateOptions() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Nirvana", "Come As You Are (Live)", seconds: 220)
+        harness.music.addToCatalog("Nirvana", "Come As You Are (Remix)", seconds: 221)
+        harness.play("Nirvana", "Come As You Are")
+
+        _ = try await harness.radio.run()
+
+        #expect(try options(in: harness).count == 2)
+    }
+
+    @Test func aCopyOfAnotherLengthIsASeparateOption() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On", seconds: 236)
+        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On", seconds: 270)
+        harness.play("Missy Elliot", "GET UR FREAK ON")
+
+        _ = try await harness.radio.run()
+
+        #expect(try options(in: harness).count == 2)
+    }
+
+    @Test func jevChoosesAmongTheRecordingsWithTheNewestModel() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
@@ -147,10 +177,21 @@ import Testing
         let state = body["state"] as? [String: Any]
         #expect(state?["station"] as? String == "Alt 102.1")
         #expect(state?["played"] as? [String: String] == ["artist": "Nirvana", "title": "Come As You Are"])
-        let questions = body["questions"] as? [String: [String: Any]] ?? [:]
-        #expect(questions.count == 10)
-        let first = (questions["c0"]?["instructions"] as? [String: Any])?["candidate"] as? [String: String]
-        #expect(first == ["artist": "Nirvana", "title": "Come As You Are (Live 0)", "album": "Album"])
+        let options = try options(in: harness)
+        #expect(options.count == 10)
+        #expect(options["a"] == ["artist": "Nirvana", "title": "Come As You Are (Live 0)", "album": "Album"])
         #expect(try await harness.radio.heldSongs().first?.candidates.count == 10)
+    }
+
+    /// The recordings offered in Jev's first question, by letter, without
+    /// "none".
+    private func options(in harness: Harness) throws -> [String: [String: String]] {
+        let request = try #require(harness.http.requests("POST https://api.typesafe.ai/v1/systemone").first)
+        let body = try #require(try JSONSerialization.jsonObject(with: request.body ?? Data()) as? [String: Any])
+        let question = try #require((body["questions"] as? [String: [String: Any]])?["pick"])
+        #expect(question["type"] as? String == "choice")
+        let criteria = try #require(question["criteria"] as? [String: Any])
+        #expect(criteria["none"] is String)
+        return criteria.compactMapValues { $0 as? [String: String] }
     }
 }

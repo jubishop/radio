@@ -8,14 +8,20 @@ public struct CatalogSong: Codable, Equatable, Sendable {
     public var albumName: String
     public var url: String
     public var isExplicit: Bool
+    /// The recording's ISRC, which copies of it on other releases share.
+    public var isrc: String?
+    public var durationMillis: Int?
 
-    public init(id: String, name: String, artistName: String, albumName: String, url: String, isExplicit: Bool) {
+    public init(id: String, name: String, artistName: String, albumName: String, url: String, isExplicit: Bool,
+                isrc: String? = nil, durationMillis: Int? = nil) {
         self.id = id
         self.name = name
         self.artistName = artistName
         self.albumName = albumName
         self.url = url
         self.isExplicit = isExplicit
+        self.isrc = isrc
+        self.durationMillis = durationMillis
     }
 }
 
@@ -114,6 +120,35 @@ enum SongIdentity {
     static func isAlternateAlbum(_ album: String) -> Bool {
         album.range(of: liveAlbumPattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
+
+    /// Whether two catalog songs are copies of one recording: they share an
+    /// ISRC, or they have the same title and artist and lengths within three
+    /// seconds, as a clean edit and its explicit original do, or a recording
+    /// re-released under a new ISRC. A live or remixed version must match
+    /// its full title too, so a live take and a remix stay apart.
+    static func sameRecording(_ song: CatalogSong, _ other: CatalogSong) -> Bool {
+        if let isrc = song.isrc, !isrc.isEmpty, isrc == other.isrc { return true }
+        guard let length = song.durationMillis, let otherLength = other.durationMillis, abs(length - otherLength) <= 3000,
+              matchingTitle(song.name) == matchingTitle(other.name), sameArtist(song.artistName, other.artistName)
+        else { return false }
+        let alternate = isAlternateVersion(title: song.name) || isAlternateAlbum(song.albumName)
+        let otherAlternate = isAlternateVersion(title: other.name) || isAlternateAlbum(other.albumName)
+        return alternate == otherAlternate && (!alternate || normalize(song.name) == normalize(other.name))
+    }
+}
+
+/// Candidates grouped into recordings, as indices in search order: each
+/// group holds the copies of one recording.
+func groupCopies(_ candidates: [CatalogSong]) -> [[Int]] {
+    var groups: [[Int]] = []
+    for (index, candidate) in candidates.enumerated() {
+        if let group = groups.firstIndex(where: { SongIdentity.sameRecording(candidates[$0[0]], candidate) }) {
+            groups[group].append(index)
+        } else {
+            groups.append([index])
+        }
+    }
+    return groups
 }
 
 /// Picks the catalog song for a played song, or nil when no candidate
