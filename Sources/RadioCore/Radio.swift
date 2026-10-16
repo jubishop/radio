@@ -312,12 +312,16 @@ public actor Radio {
     /// each recording among its candidates. When Jev is sure of a recording,
     /// Radio adds its explicit copy, or else its first in Apple's search
     /// order, usually the original release; otherwise it records that copy
-    /// as Jev's pick for review. After a failure, the rest wait for the next
-    /// sync.
+    /// as Jev's pick for review. When an answer names a newer model, held
+    /// songs judged by an older one are asked about once more; Radio follows
+    /// the newest model, and learns of one only from an answer. After a
+    /// failure, the rest wait for the next sync.
     private func judgeHeldSongs(_ report: inout SyncReport) async throws {
         guard let jev else { return }
-        for item in try store.songsToJudge() {
+        var asked = Set<Int64>()
+        while let item = try store.songsToJudge(model: store.meta("jev.model")).first(where: { !asked.contains($0.song.id) }) {
             let song = item.song
+            asked.insert(song.id)
             let recordings = groupCopies(song.candidates)
             let verdict: JevVerdict
             do {
@@ -329,6 +333,7 @@ public actor Radio {
                 return
             }
             try store.setMeta("jev.last_error", nil)
+            try store.setMeta("jev.model", verdict.model)
             let scores = verdict.scores
             let best = scores.indices.max { scores[$0] < scores[$1] }!
             let copies = recordings[best]

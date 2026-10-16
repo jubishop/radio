@@ -82,6 +82,35 @@ import Testing
         #expect(try await harness.radio.status().jevError == nil)
     }
 
+    /// Radio follows the newest model, so the user agreed on 2026-10-15 that
+    /// songs still waiting for review get one question from each new model.
+    @Test func aNewModelJudgesSongsStillWaitingForReviewAgain() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Nirvana", "Lake of Fire (Live Acoustic)")
+        harness.music.addToCatalog("Nirvana", "Come As You Are (Live)")
+        harness.jev.score("Lake of Fire (Live Acoustic)", 0.4)
+        harness.play("Nirvana", "Lake Of Fire", minutesAgo: 5)
+        harness.play("Nirvana", "Come As You Are")
+        _ = try await harness.radio.run()
+        let sentBack = try #require(try await harness.radio.heldSongs().first { $0.title == "Come As You Are" })
+        _ = try await harness.radio.match(songID: sentBack.id, choice: .candidate(0))
+        try await harness.radio.undo(songID: sentBack.id)
+
+        harness.jev.setModel("jev-1.15.0")
+        harness.jev.score("Lake of Fire (Live Acoustic)", 0.95)
+        harness.music.addToCatalog("Incubus", "Wish You Were Here")
+        harness.clock.advance(hours: 1)
+        harness.play("Incubus", "I Wish You Were Here")
+        _ = try await harness.radio.run()
+        _ = try await harness.radio.run()
+
+        #expect(FakeJev.askedTitles(harness.http) == ["Lake Of Fire", "Come As You Are", "I Wish You Were Here", "Lake Of Fire"])
+        let lake = try #require(try await harness.radio.reviewedSongs().first { $0.title == "Lake Of Fire" })
+        #expect(lake.decision == .jev(score: 0.95, model: "jev-1.15.0"))
+    }
+
     @Test func withoutAKeyJevIsNotAsked() async throws {
         let harness = try Harness(jevAPIKey: nil)
         try await harness.signIn()

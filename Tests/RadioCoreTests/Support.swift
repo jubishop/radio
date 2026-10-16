@@ -166,6 +166,7 @@ final class FakeHubbard: Sendable {
 final class FakeJev: Sendable {
     private let scores = Mutex<[String: Double]>([:])
     private let failing = Mutex(false)
+    private let model = Mutex("jev-1.14.0")
 
     init(http: FakeHTTP) {
         http.on("POST https://api.typesafe.ai/v1/systemone") { [self] request in
@@ -184,7 +185,7 @@ final class FakeJev: Sendable {
                 let choice = probabilities.max { $0.value < $1.value }?.key ?? "none"
                 answers[id] = ["type": "choice", "choice": choice, "probabilities": probabilities, "confidence": 0.5]
             }
-            return json(["model": "jev-1.14.0", "answers": answers, "usage": ["input_tokens": 100, "output_tokens": 10]])
+            return json(["model": model.withLock { $0 }, "answers": answers, "usage": ["input_tokens": 100, "output_tokens": 10]])
         }
     }
 
@@ -194,6 +195,19 @@ final class FakeJev: Sendable {
 
     func setFailing(_ isFailing: Bool) {
         failing.withLock { $0 = isFailing }
+    }
+
+    /// The model the alias points to, as each answer names it.
+    func setModel(_ name: String) {
+        model.withLock { $0 = name }
+    }
+
+    /// The played titles Jev was asked about, in order.
+    static func askedTitles(_ http: FakeHTTP) -> [String] {
+        http.requests("POST https://api.typesafe.ai/v1/systemone").compactMap { request in
+            let body = (try? JSONSerialization.jsonObject(with: request.body ?? Data())) as? [String: Any]
+            return ((body?["state"] as? [String: Any])?["played"] as? [String: String])?["title"]
+        }
     }
 }
 

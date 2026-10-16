@@ -609,17 +609,20 @@ final class Store {
         return JevSuggestion(candidate: pick, score: score)
     }
 
-    /// Held songs Jev hasn't judged, leaving out those the user sent back.
-    /// SQLite takes the bare station name from the row with the latest play.
-    func songsToJudge() throws -> [SongToJudge] {
-        try db.query(
+    /// Held songs Jev hasn't judged, or judged with a model other than
+    /// `model`, leaving out those the user sent back. SQLite takes the bare
+    /// station name from the row with the latest play.
+    func songsToJudge(model: String?) throws -> [SongToJudge] {
+        let model = model.map(SQLValue.text) ?? .null
+        return try db.query(
             """
             SELECT s.*, st.name AS station_name, MAX(p.played_at) AS last_played
             FROM songs s JOIN plays p ON p.song_id = s.id JOIN stations st ON st.id = p.station_id
-            WHERE s.status = 'unmatched' AND s.jev_checked_at IS NULL AND s.undone_at IS NULL
-                AND s.candidates IS NOT NULL AND s.candidates != '[]'
+            WHERE s.status = 'unmatched' AND s.undone_at IS NULL AND s.candidates IS NOT NULL AND s.candidates != '[]'
+                AND (s.jev_checked_at IS NULL OR (? IS NOT NULL AND s.jev_model IS NOT ?))
             GROUP BY s.id ORDER BY s.held_at, s.id
-            """
+            """,
+            [model, model]
         ).map { SongToJudge(song: song(from: $0), station: $0.string("station_name")!) }
     }
 
