@@ -114,7 +114,8 @@ be added at the 0.9 bar and 8 more suggested at the 0.6 bar.
 
 The sample is small, and only 19 cases were as hard as the songs Radio will
 actually ask about. The bars were measured on `jev-1.14.0`, and Radio follows
-the `jev-preview` alias, which can move to a newer model. To repeat the test,
-dump catalog search results for a set of songs through `AppleMusicClient`,
-ask Jev with the questions in `Jev.swift`, and compare the picks with the
-user's matches.
+the `jev-preview` alias, which can move to a newer model. On 2026-10-15 the
+user chose not to keep the evaluation script, since the review page shows the
+model behind each Jev pick and can undo it. To repeat the test, dump catalog
+search results for a set of songs through `AppleMusicClient`, ask Jev with the
+question in `Jev.swift`, and compare the picks with the user's matches.
