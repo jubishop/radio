@@ -34,6 +34,16 @@ import Testing
         #expect(page.contains(#"<a href="/playlists/radio">1 song in Radio</a>, <a href="/playlists/archive">1 in Radio Archive</a>"#))
     }
 
+    /// The review page also lists past decisions to undo, so the user asked
+    /// on 2026-10-15 for the dashboard to link to it with nothing waiting.
+    @Test func theDashboardLinksToTheReviewPageWithNothingToReview() async throws {
+        let harness = try Harness()
+
+        let page = text(await Dashboard(radio: harness.radio).handle(request("GET", "/")))
+
+        #expect(page.contains(#"<a href="/review">No songs to review</a>"#))
+    }
+
     @Test func eachPlaylistsPageListsItsSongsWithTheStationsThatPlayedThem() async throws {
         let harness = try Harness(playlistLimit: 1)
         try await harness.signIn()

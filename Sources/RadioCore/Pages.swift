@@ -81,9 +81,11 @@ enum Pages {
         return page(title: "\(name) · Radio", body: body + "</section>", refresh: false)
     }
 
+    /// Links to the review page even with nothing waiting, since it also
+    /// lists past decisions to undo.
     private static func review(count: Int) -> String {
         count == 0
-            ? "No songs to review"
+            ? "<a href=\"/review\">No songs to review</a>"
             : "<a href=\"/review\" class=\"bad\">\(count) song\(count == 1 ? "" : "s") to review</a>"
     }
 
