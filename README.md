@@ -23,9 +23,8 @@ commands and the [check schedule](docs/foundation/engineering-policy.md#checks)
 for when to run `bin/check --documents-only`, `bin/check`, and
 `bin/check --full`. The checks need ShellCheck; `bin/doctor` diagnoses setup.
 
-Hosted projects follow [Git remote setup](docs/git-remotes.md) to push to the
-primary host and a private SourceHut repository. Restore that local
-configuration after a fresh clone; `bin/setup` never publishes repositories.
+Hosted projects record their primary remote in
+[Git remotes](docs/git-remotes.md); `bin/setup` never publishes repositories.
 
 ## Knowledge
 
