@@ -25,6 +25,15 @@ public enum SQLValue: Equatable, Sendable {
         case .null: nil
         }
     }
+
+    var double: Double? {
+        switch self {
+        case .integer(let value): Double(value)
+        case .real(let value): value
+        case .text(let value): Double(value)
+        case .null: nil
+        }
+    }
 }
 
 extension SQLValue: ExpressibleByStringLiteral, ExpressibleByIntegerLiteral {
@@ -39,6 +48,7 @@ struct Row {
     subscript(_ column: String) -> SQLValue { values[column] ?? .null }
     func string(_ column: String) -> String? { self[column].string }
     func int(_ column: String) -> Int64? { self[column].int }
+    func double(_ column: String) -> Double? { self[column].double }
 }
 
 struct DatabaseError: Error, CustomStringConvertible {

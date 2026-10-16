@@ -357,6 +357,54 @@ the live database that day, the fix rejected none of the 539 automatic
 matches, cleared five of the nine held songs, and would have matched four of
 the 15 earlier manual picks.
 
+### Let Jev resolve held-back songs
+
+Accepted 2026-10-15 (td-810dd1). Each sync asks TypeSafe's Jev about every
+held song it hasn't judged, with one yes/no question per Apple Music
+candidate: is this the recording the station played? Held songs now keep the
+top ten candidates instead of three. The review page shows three and folds
+the rest away, keeping Jev's pick in view.
+
+- **Score 0.9 or higher:** Radio adds that candidate, as matched by Jev. Among
+  the candidates scoring that high, it prefers an explicit version.
+- **From 0.6 up to 0.9:** the review page and `radio unmatched` show it as
+  Jev's suggestion.
+- **Below 0.6:** the song waits for review as before.
+
+Jev judges each held song once. When a request fails, the song waits for the
+next sync and the dashboard shows the error. Without `JEV_API_KEY` in the env
+file, Radio doesn't ask Jev.
+
+After seeing the [evaluation](jev-matching-evaluation.md), the user chose the
+newest model, jev-1.14.0, with the 0.9 bar, then set the suggestion bar to
+0.6. The user also asked Radio to always use the newest model instead of a
+pinned version, so Radio sends `jev-preview`, TypeSafe's alias for its newest
+release, official or preview. `jev-latest`, the newest official release, was
+jev-1.13.0 then. The tradeoff is that scores can shift when the alias moves,
+with no change to Radio, while the bars were measured on jev-1.14.0. Radio
+records the model that answered with each verdict, and the review page shows
+it.
+
+Strict matching was chosen because a wrong track couldn't be removed. Radio
+now removes tracks through Music.app, and any Jev pick can be undone from the
+review page.
+
+### Review everything Jev or the user decided
+
+Accepted 2026-10-15. The user asked the review page to show everything Jev or
+they decided, so any of it can be undone, with what needs them at the top.
+From top to bottom, the page lists songs needing review, each with Jev's
+suggestion when it has one, then every song Jev or the user matched, newest
+decision first. Songs the user ignored are in that list too, so an ignore can
+be undone; the user hasn't confirmed this part. Automatic matches aren't
+listed, since there were 539 of them.
+
+Undo puts a song back at the top of the page at once. When the song was
+matched, the next sync removes its track from the playlists, unless another
+matched song still uses it. Neither the matching rules nor Jev match a song
+the user sent back, so it waits for the user. `radio reviewed` and
+`radio undo` do the same in Terminal.
+
 ### Review held-back songs on a home-network web page
 
 Accepted 2026-10-13. An always-running LaunchAgent serves the review page at

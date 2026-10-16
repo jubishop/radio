@@ -74,6 +74,32 @@ extension Radio {
         return replaced
     }
 
+    /// Removes the tracks of songs the user sent back to review, unless a
+    /// song matched since still uses one. Returns how many tracks left.
+    func removeTracksSentBack(music: inout MusicAppSession) async throws -> Int {
+        guard musicApp != nil else { return 0 }
+        var removed = 0
+        for removal in try store.playlistRemovals() {
+            guard try !store.isMatched(catalogID: removal.catalogID) else {
+                try store.deleteRemoval(catalogID: removal.catalogID)
+                continue
+            }
+            let holding = try store.playlistsHolding(catalogID: removal.catalogID)
+            var removedEverywhere = true
+            for kind in holding {
+                var playlist = try store.playlist(kind)
+                if try await !removeEntry(catalogID: removal.catalogID, song: removal.song, playlist: &playlist, music: &music) {
+                    removedEverywhere = false
+                }
+            }
+            if removedEverywhere {
+                try store.deleteRemoval(catalogID: removal.catalogID)
+                if !holding.isEmpty { removed += 1 }
+            }
+        }
+        return removed
+    }
+
     /// Syncs "Radio" before the archive, so trouble in the much larger
     /// archive can't hold it up. Without Music.app, nothing changes. Returns
     /// the changes by playlist name.

@@ -63,7 +63,9 @@ hand-written pages to bypass failed checks.
 - [Radio design](design.md): accepted decisions for the station logger, the
   Apple Music playlists, and the dashboard.
 - [Operations](operations.md): installing Radio, connecting Apple Music,
-  reviewing songs, alerts, and removal.
+  reviewing songs, Jev, alerts, and removal.
+- [Jev matching evaluation](jev-matching-evaluation.md): how Jev did on
+  Radio's held-back songs before Radio used it, by question design and model.
 - [Audacy now-playing feed](audacy-now-playing-feed.md): the JSON endpoint
   that lists a station's recent plays, and its limits.
 - [iHeartRadio track history](iheart-track-history.md): how to find an

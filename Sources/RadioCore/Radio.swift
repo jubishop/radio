@@ -26,15 +26,22 @@ public struct PlaylistChanges: Equatable, Sendable {
 public struct SyncReport: Sendable {
     public var skippedReason: String?
     public var matched = 0
+    /// Held songs Jev was sure of, added without review.
+    public var jevMatched = 0
     public var held = 0
     /// Changes by playlist name.
     public var playlists: [String: PlaylistChanges] = [:]
     /// Songs whose earlier automatic match the current rules reject, removed
     /// from the playlists to be matched again.
     public var replaced = 0
+    /// Tracks removed from the playlists because the user sent their song
+    /// back to review.
+    public var removed = 0
     /// Songs Music.app was asked to comment with their latest play and
     /// stations. A comment someone else wrote stays.
     public var commented = 0
+    /// Why Jev couldn't judge held songs; they wait for the next sync.
+    public var jevError: String?
     public var error: String?
 }
 
@@ -64,6 +71,8 @@ public struct RadioStatus: Sendable {
     public var lastSyncError: String?
     /// Why Music.app couldn't update a playlist, until it can.
     public var musicAppError: String?
+    /// Why Jev couldn't judge held songs, until it can.
+    public var jevError: String?
     public var heldCount: Int
 }
 
@@ -84,6 +93,7 @@ public actor Radio {
     let sources: [String: PlaySource]
     let notifier: PushoverNotifier
     let musicApp: MusicApp?
+    let jev: Jev?
     let now: @Sendable () -> Date
     /// "Radio" keeps this many of the most recently played songs.
     public nonisolated let playlistLimit: Int
@@ -99,6 +109,13 @@ public actor Radio {
     /// MusicKit key answers 401 intermittently for minutes while it rolls out.
     static let authAlertDelay: TimeInterval = 60 * 60
     static let nudgeInterval: TimeInterval = 7 * 24 * 60 * 60
+    /// Apple Music candidates kept for each held song, for Jev and review.
+    static let storedCandidates = 10
+    /// Jev adds a held song when it scores a candidate at least this high,
+    /// and suggests one scored at least `jevSuggestScore`. The user chose
+    /// both on 2026-10-15; see docs/design.md.
+    static let jevAddScore = 0.9
+    static let jevSuggestScore = 0.6
 
     public init(
         home: RadioHome,
@@ -106,6 +123,7 @@ public actor Radio {
         sources: [PlaySource],
         notifier: PushoverNotifier,
         musicApp: MusicApp? = nil,
+        jevAPIKey: String? = nil,
         playlistLimit: Int = 100,
         archiveLimit: Int = 10_000,
         dashboardURL: String = "http://jubi.local:8102",
@@ -120,6 +138,7 @@ public actor Radio {
         self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.name, $0) })
         self.notifier = notifier
         self.musicApp = musicApp
+        self.jev = jevAPIKey.flatMap { $0.isEmpty ? nil : Jev(http: http, apiKey: $0) }
         self.playlistLimit = playlistLimit
         self.archiveLimit = archiveLimit
         self.dashboardURL = dashboardURL
@@ -252,9 +271,10 @@ public actor Radio {
         do {
             try await fillCatalogDetails(client: client)
             report.replaced = try await replaceRejectedMatches(music: &music)
+            report.removed = try await removeTracksSentBack(music: &music)
             // A song held back before a matching fix may now match one of its
             // candidates.
-            for song in try store.songs(status: .unmatched) {
+            for song in try store.songs(status: .unmatched) where song.undoneAt == nil {
                 if let match = chooseMatch(artist: song.artist, title: song.title, candidates: song.candidates) {
                     try store.markMatched(songID: song.id, catalog: match, by: "auto", at: now())
                     report.matched += 1
@@ -266,10 +286,11 @@ public actor Radio {
                     try store.markMatched(songID: song.id, catalog: match, by: "auto", at: now())
                     report.matched += 1
                 } else {
-                    try store.markHeld(songID: song.id, candidates: Array(results.prefix(3)), at: now())
+                    try store.markHeld(songID: song.id, candidates: Array(results.prefix(Self.storedCandidates)), at: now())
                     report.held += 1
                 }
             }
+            try await judgeHeldSongs(&report)
             report.playlists = try await syncPlaylists(client: client, music: &music)
             report.commented = try await syncComments(music: &music)
             try store.setMetaDate("auth.rejected_at", nil)
@@ -285,6 +306,36 @@ public actor Radio {
         }
         try finish(music)
         return report
+    }
+
+    /// Asks Jev about each held song it hasn't judged. Jev adds a song when
+    /// it's sure of a candidate, preferring an explicit version among those
+    /// it's sure of, and otherwise records its pick for review. After a
+    /// failure, the rest wait for the next sync.
+    private func judgeHeldSongs(_ report: inout SyncReport) async throws {
+        guard let jev else { return }
+        for item in try store.songsToJudge() {
+            let song = item.song
+            let verdict: JevVerdict
+            do {
+                verdict = try await jev.judge(station: item.station, artist: song.artist, title: song.title,
+                                              candidates: song.candidates)
+            } catch {
+                report.jevError = String(describing: error)
+                try store.setMeta("jev.last_error", report.jevError)
+                return
+            }
+            try store.setMeta("jev.last_error", nil)
+            let scores = verdict.scores
+            let best = scores.indices.max { scores[$0] < scores[$1] }!
+            let sure = scores.indices.filter { scores[$0] >= Self.jevAddScore }
+            let pick = sure.filter { song.candidates[$0].isExplicit }.max { scores[$0] < scores[$1] } ?? best
+            try store.recordJevVerdict(songID: song.id, model: verdict.model, score: scores[pick], pick: pick, at: now())
+            if scores[pick] >= Self.jevAddScore {
+                try store.markMatched(songID: song.id, catalog: song.candidates[pick], by: "jev", at: now())
+                report.jevMatched += 1
+            }
+        }
     }
 
     // MARK: Scheduled runs
@@ -381,6 +432,22 @@ public actor Radio {
         return catalog
     }
 
+    /// Songs Jev or the user matched, and songs the user ignored, most
+    /// recently decided first.
+    public func reviewedSongs() throws -> [ReviewedSong] {
+        try store.reviewedSongs()
+    }
+
+    /// Sends a matched or ignored song back to review, where it stays until
+    /// the user decides. A matched song's track leaves the playlists on the
+    /// next sync.
+    public func undo(songID: Int64) throws {
+        guard let song = try store.song(id: songID), song.status == .matched || song.status == .ignored else {
+            throw RadioError("Song \(songID) isn't matched or ignored")
+        }
+        try store.sendBackToReview(songID: songID, at: now())
+    }
+
     public func ignore(songID: Int64) throws {
         guard let song = try store.song(id: songID), song.status == .unmatched else {
             throw RadioError("Song \(songID) isn't waiting for review")
@@ -407,6 +474,7 @@ public actor Radio {
             lastSyncAt: try store.metaDate("sync.last_at"),
             lastSyncError: try store.meta("sync.last_error"),
             musicAppError: try store.meta("music.last_error"),
+            jevError: try store.meta("jev.last_error"),
             heldCount: try store.heldCount(since: nil)
         )
     }

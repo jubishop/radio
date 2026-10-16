@@ -160,6 +160,36 @@ final class FakeHubbard: Sendable {
     }
 }
 
+/// TypeSafe's System One endpoint, answering Jev's per-candidate questions
+/// with the score set for each candidate title, 0 unless set.
+final class FakeJev: Sendable {
+    private let scores = Mutex<[String: Double]>([:])
+    private let failing = Mutex(false)
+
+    init(http: FakeHTTP) {
+        http.on("POST https://api.typesafe.ai/v1/systemone") { [self] request in
+            if failing.withLock({ $0 }) { return json(["detail": "unavailable"], status: 500) }
+            let body = (try? JSONSerialization.jsonObject(with: request.body ?? Data())) as? [String: Any] ?? [:]
+            let questions = body["questions"] as? [String: [String: Any]] ?? [:]
+            var answers: [String: Any] = [:]
+            for (id, question) in questions {
+                let candidate = (question["instructions"] as? [String: Any])?["candidate"] as? [String: Any]
+                let title = candidate?["title"] as? String ?? ""
+                answers[id] = ["type": "noul", "noul": scores.withLock { $0[title] } ?? 0]
+            }
+            return json(["model": "jev-1.14.0", "answers": answers, "usage": ["input_tokens": 100, "output_tokens": 10]])
+        }
+    }
+
+    func score(_ title: String, _ value: Double) {
+        scores.withLock { $0[title] = value }
+    }
+
+    func setFailing(_ isFailing: Bool) {
+        failing.withLock { $0 = isFailing }
+    }
+}
+
 /// The parts of the Apple Music API Radio uses, with two copies of the
 /// library: Apple's, which the API changes, and Music.app's on the Mac. A
 /// sync uploads each playlist Music.app changed, replacing Apple's copy, and
@@ -434,16 +464,19 @@ struct Harness {
     let audacy: FakeAudacy
     let iheart: FakeIHeart
     let hubbard: FakeHubbard
+    let jev: FakeJev
     let music: FakeAppleMusic
     let musicApp: FakeMusicApp
     let home: RadioHome
     let radio: Radio
 
-    init(pushover: Bool = true, playlistLimit: Int = 100, archiveLimit: Int = 10_000, http: FakeHTTP = FakeHTTP()) throws {
+    init(pushover: Bool = true, jevAPIKey: String? = "jev-key", playlistLimit: Int = 100, archiveLimit: Int = 10_000,
+         http: FakeHTTP = FakeHTTP()) throws {
         self.http = http
         audacy = FakeAudacy(http: http)
         iheart = FakeIHeart(http: http)
         hubbard = FakeHubbard(http: http)
+        jev = FakeJev(http: http)
         music = FakeAppleMusic(http: http)
         musicApp = FakeMusicApp(music: music)
         http.on("POST https://api.pushover.net/") { _ in json(["status": 1]) }
@@ -456,6 +489,7 @@ struct Harness {
             sources: [AudacySource(http: http), IHeartSource(http: http), HubbardSource(http: http)],
             notifier: PushoverNotifier(http: http, userKey: pushover ? "user" : nil, apiKey: pushover ? "app" : nil),
             musicApp: musicApp,
+            jevAPIKey: jevAPIKey,
             playlistLimit: playlistLimit,
             archiveLimit: archiveLimit,
             now: { clock.now }

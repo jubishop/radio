@@ -20,10 +20,14 @@ let usage = """
       serve [--port 8102]     Serve the dashboard (launchd keeps this running)
 
     Review
-      unmatched               List songs held back for review
+      unmatched               List songs held back for review, with Jev's
+                              suggestion
       match <id><letter>      Use a listed candidate, e.g. `radio match 12a`
       match <id> <link>       Use any Apple Music song link
       ignore <id>             Never add this song
+      reviewed                List songs Jev or you matched, and songs you
+                              ignored, newest first
+      undo <id>               Send one of those back for review
 
     Setup and data
       credentials set --key-id ID --team-id ID --key-file AuthKey.p8
@@ -31,7 +35,9 @@ let usage = """
       status                  Show station and sync health
       export [--station SLUG] Write every logged play as CSV
 
-    RADIO_HOME overrides ~/Library/Application Support/Radio.
+    RADIO_HOME overrides ~/Library/Application Support/Radio. RADIO_ENV_FILE,
+    ~/.env by default, holds PUSHOVER_USER_KEY, PUSHOVER_API_KEY, and
+    JEV_API_KEY.
     """
 
 struct UsageError: Error, CustomStringConvertible {
@@ -58,7 +64,8 @@ func makeRadio() throws -> Radio {
         http: http,
         sources: [AudacySource(http: http), IHeartSource(http: http), HubbardSource(http: http)],
         notifier: PushoverNotifier(http: http, envFile: envFile),
-        musicApp: ScriptedMusicApp()
+        musicApp: ScriptedMusicApp(),
+        jevAPIKey: readEnvFile(at: envFile)["JEV_API_KEY"]
     )
 }
 
@@ -83,10 +90,14 @@ func printSync(_ report: SyncReport) {
             .filter { $0.1 > 0 }.map { "\($0.0) \($0.1)" }
         return parts.isEmpty ? nil : "\(name): " + parts.joined(separator: ", ")
     }
-    log("Sync: \(report.matched) matched, \(report.held) held for review"
-        + changes.map { "; \($0)" }.joined()
-        + (report.replaced == 0 ? "" : "; replaced \(report.replaced) rejected matches")
-        + (report.commented == 0 ? "" : "; commented \(report.commented) song\(report.commented == 1 ? "" : "s")"))
+    var summary = "\(report.matched) matched, \(report.held) held for review"
+    if report.jevMatched > 0 { summary += ", \(report.jevMatched) matched by Jev" }
+    var details = changes
+    if report.replaced > 0 { details.append("replaced \(report.replaced) rejected matches") }
+    if report.removed > 0 { details.append("removed \(report.removed) sent back for review") }
+    if report.commented > 0 { details.append("commented \(report.commented) song\(report.commented == 1 ? "" : "s")") }
+    log("Sync: " + ([summary] + details).joined(separator: "; "))
+    if let error = report.jevError { log("Jev failed: \(error)") }
     if let error = report.error { log("Sync failed: \(error)") }
 }
 
@@ -152,7 +163,8 @@ func main(_ arguments: [String]) async throws -> Int32 {
             print("\(song.id)  \(song.artist) – \(song.title)  (\(song.playCount) play\(song.playCount == 1 ? "" : "s") on \(song.stations.joined(separator: ", ")), last \(displayTime(song.lastPlayedAt)))")
             for (index, candidate) in song.candidates.enumerated() {
                 let explicit = candidate.isExplicit ? " [explicit]" : ""
-                print("    \(song.id)\(candidateLetter(index))  \(candidate.artistName) – \(candidate.name) (\(candidate.albumName))\(explicit)  \(candidate.url)")
+                let suggested = song.suggestion.flatMap { $0.candidate == index ? "  ← Jev suggests (\($0.score.formatted(.number.precision(.fractionLength(2)))))" : nil } ?? ""
+                print("    \(song.id)\(candidateLetter(index))  \(candidate.artistName) – \(candidate.name) (\(candidate.albumName))\(explicit)  \(candidate.url)\(suggested)")
             }
             if song.candidates.isEmpty { print("    (no candidates)") }
         }
@@ -164,6 +176,22 @@ func main(_ arguments: [String]) async throws -> Int32 {
         guard let id = rest.first.flatMap({ Int64($0) }) else { throw UsageError(description: "Usage: radio ignore <id>") }
         try await makeRadio().ignore(songID: id)
         print("Ignored song \(id).")
+    case "reviewed":
+        let songs = try await makeRadio().reviewedSongs()
+        if songs.isEmpty { print("Nothing reviewed yet.") }
+        for song in songs {
+            let decision = switch song.decision {
+            case .jev(let score, let model): "matched by Jev, \(score.formatted(.number.precision(.fractionLength(2)))) from \(model)"
+            case .manual: "matched by you"
+            case .ignored: "ignored by you"
+            }
+            let pick = song.catalog.map { " → \($0.artistName) – \($0.name)" } ?? ""
+            print("\(song.id)  \(song.artist) – \(song.title)\(pick)  (\(decision), \(displayTime(song.decidedAt)))")
+        }
+    case "undo":
+        guard let id = rest.first.flatMap({ Int64($0) }) else { throw UsageError(description: "Usage: radio undo <id>") }
+        try await makeRadio().undo(songID: id)
+        print("Sent song \(id) back for review. If it was matched, it leaves the playlists on the next sync.")
     case "credentials":
         let radio = try makeRadio()
         switch rest.first {
@@ -198,6 +226,7 @@ func main(_ arguments: [String]) async throws -> Int32 {
         print("Last sync: \(status.lastSyncAt.map(displayTime) ?? "never")\(status.lastSyncError.map { " (failed: \($0))" } ?? "")")
         print("Songs to review: \(status.heldCount)")
         if let error = status.musicAppError { print("Music.app: \(error)") }
+        if let error = status.jevError { print("Jev: \(error)") }
         print("Playlist \"\(Radio.playlistName)\": \(status.playlistCount) of \(radio.playlistLimit) songs")
         print("Playlist \"\(Radio.archivePlaylistName)\": \(status.archiveCount) of \(radio.archiveLimit) songs")
         for summary in status.stations {

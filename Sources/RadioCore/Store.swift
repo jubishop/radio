@@ -29,6 +29,9 @@ public struct Song: Equatable, Sendable {
     public var matchedBy: String?
     public var candidates: [CatalogSong]
     public var heldAt: Date?
+    /// When the user sent the song back to review. Neither the matching
+    /// rules nor Jev match such a song again; the user decides.
+    public var undoneAt: Date?
 }
 
 /// One of Radio's Apple Music playlists, which every station feeds.
@@ -116,6 +119,51 @@ public struct HeldSong: Equatable, Sendable {
     public var lastPlayedAt: Date
     public var stations: [String]
     public var candidates: [CatalogSong]
+    /// Jev's pick, when it scored a candidate high enough to suggest.
+    public var suggestion: JevSuggestion?
+}
+
+/// A candidate Jev thinks is likely the recording the station played.
+public struct JevSuggestion: Equatable, Sendable {
+    /// The candidate's position (0 for `a`).
+    public var candidate: Int
+    public var score: Double
+
+    public init(candidate: Int, score: Double) {
+        self.candidate = candidate
+        self.score = score
+    }
+}
+
+/// A held-back song that Jev or the user has decided.
+public struct ReviewedSong: Equatable, Sendable {
+    public enum Decision: Equatable, Sendable {
+        /// Jev matched it, scoring the pick `score`.
+        case jev(score: Double, model: String)
+        case manual
+        case ignored
+    }
+
+    public var id: Int64
+    public var artist: String
+    public var title: String
+    public var decision: Decision
+    /// Nil for an ignored song.
+    public var catalog: CatalogSong?
+    public var decidedAt: Date
+}
+
+/// A held song for Jev to judge, with the station that played it last.
+struct SongToJudge {
+    var song: Song
+    var station: String
+}
+
+/// A playlist track whose song went back to review, to remove from the
+/// playlists.
+struct PlaylistRemoval {
+    var catalogID: String
+    var song: MusicAppSong
 }
 
 /// Radio's SQLite schema and queries.
@@ -128,7 +176,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 7
+    private static let schemaVersion: Int64 = 8
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -143,6 +191,7 @@ final class Store {
             if version < 5 { try migrateToSchemaFive() }
             if version < 6 { try migrateToSchemaSix() }
             if version < 7 { try migrateToSchemaSeven() }
+            if version < 8 { try migrateToSchemaEight() }
         }
     }
 
@@ -320,6 +369,18 @@ final class Store {
                            [.text(SongIdentity.key(artist: artist, title: title)), .integer(row.int("id")!)])
         }
         try db.execute("PRAGMA user_version = 7")
+    }
+
+    /// Records Jev's verdict on each held song and the user's undos, and
+    /// remembers tracks to remove because their song went back to review.
+    private func migrateToSchemaEight() throws {
+        for column in ["jev_checked_at TEXT", "jev_model TEXT", "jev_score REAL", "jev_pick INTEGER", "undone_at TEXT"] {
+            try db.execute("ALTER TABLE songs ADD COLUMN \(column)")
+        }
+        try db.execute(
+            "CREATE TABLE playlist_removals (catalog_id TEXT PRIMARY KEY, name TEXT NOT NULL, artist TEXT NOT NULL, album TEXT NOT NULL)"
+        )
+        try db.execute("PRAGMA user_version = 8")
     }
 
     // MARK: Stations
@@ -501,7 +562,11 @@ final class Store {
     func markHeld(songID: Int64, candidates: [CatalogSong], at date: Date) throws {
         let json = String(decoding: try JSONEncoder().encode(candidates), as: UTF8.self)
         try db.execute(
-            "UPDATE songs SET status = 'unmatched', candidates = ?, held_at = ? WHERE id = ?",
+            """
+            UPDATE songs SET status = 'unmatched', candidates = ?, held_at = ?, jev_checked_at = NULL, jev_model = NULL,
+                jev_score = NULL, jev_pick = NULL, undone_at = NULL
+            WHERE id = ?
+            """,
             [.text(json), .text(iso(date)), .integer(songID)]
         )
     }
@@ -531,9 +596,103 @@ final class Store {
                 playCount: Int(row.int("play_count") ?? 0),
                 lastPlayedAt: parseISODate(row.string("last_played")!)!,
                 stations: (row.string("station_names") ?? "").split(separator: ",").map(String.init).sorted(),
-                candidates: song.candidates
+                candidates: song.candidates,
+                suggestion: Self.suggestion(row, candidates: song.candidates)
             )
         }
+    }
+
+    private static func suggestion(_ row: Row, candidates: [CatalogSong]) -> JevSuggestion? {
+        guard let pick = row.int("jev_pick").map(Int.init), candidates.indices.contains(pick),
+              let score = row.double("jev_score"), score >= Radio.jevSuggestScore
+        else { return nil }
+        return JevSuggestion(candidate: pick, score: score)
+    }
+
+    /// Held songs Jev hasn't judged, leaving out those the user sent back.
+    /// SQLite takes the bare station name from the row with the latest play.
+    func songsToJudge() throws -> [SongToJudge] {
+        try db.query(
+            """
+            SELECT s.*, st.name AS station_name, MAX(p.played_at) AS last_played
+            FROM songs s JOIN plays p ON p.song_id = s.id JOIN stations st ON st.id = p.station_id
+            WHERE s.status = 'unmatched' AND s.jev_checked_at IS NULL AND s.undone_at IS NULL
+                AND s.candidates IS NOT NULL AND s.candidates != '[]'
+            GROUP BY s.id ORDER BY s.held_at, s.id
+            """
+        ).map { SongToJudge(song: song(from: $0), station: $0.string("station_name")!) }
+    }
+
+    func recordJevVerdict(songID: Int64, model: String, score: Double, pick: Int, at date: Date) throws {
+        try db.execute(
+            "UPDATE songs SET jev_checked_at = ?, jev_model = ?, jev_score = ?, jev_pick = ? WHERE id = ?",
+            [.text(iso(date)), .text(model), .real(score), .integer(Int64(pick)), .integer(songID)]
+        )
+    }
+
+    /// Songs Jev or the user matched, and songs the user ignored, most
+    /// recently decided first.
+    func reviewedSongs() throws -> [ReviewedSong] {
+        try db.query(
+            """
+            SELECT * FROM songs
+            WHERE (status = 'matched' AND matched_by IN ('jev', 'manual')) OR status = 'ignored'
+            ORDER BY resolved_at DESC, id DESC
+            """
+        ).map { row in
+            let song = song(from: row)
+            let decision: ReviewedSong.Decision =
+                song.status == .ignored ? .ignored
+                : song.matchedBy == "jev" ? .jev(score: row.double("jev_score") ?? 0, model: row.string("jev_model") ?? "")
+                : .manual
+            let catalog = song.status == .ignored ? nil : song.catalogID.map {
+                CatalogSong(id: $0, name: song.catalogName ?? "", artistName: song.catalogArtist ?? "",
+                            albumName: song.catalogAlbum ?? "", url: song.catalogURL ?? "", isExplicit: false)
+            }
+            return ReviewedSong(id: song.id, artist: song.artist, title: song.title, decision: decision, catalog: catalog,
+                                decidedAt: row.string("resolved_at").flatMap(parseISODate) ?? .distantPast)
+        }
+    }
+
+    /// Sends a matched or ignored song back to review. A matched song's
+    /// track leaves the playlists on the next sync, unless another matched
+    /// song still uses it then.
+    func sendBackToReview(songID: Int64, at date: Date) throws {
+        try db.transaction {
+            guard let song = try song(id: songID) else { return }
+            if song.status == .matched, let catalogID = song.catalogID, let name = song.catalogName,
+               let artist = song.catalogArtist {
+                try db.execute(
+                    "INSERT OR IGNORE INTO playlist_removals (catalog_id, name, artist, album) VALUES (?, ?, ?, ?)",
+                    [.text(catalogID), .text(name), .text(artist), .text(song.catalogAlbum ?? "")]
+                )
+            }
+            try db.execute(
+                """
+                UPDATE songs SET status = 'unmatched', catalog_id = NULL, catalog_url = NULL, catalog_name = NULL,
+                    catalog_artist = NULL, catalog_album = NULL, matched_by = NULL, resolved_at = NULL,
+                    jev_score = NULL, jev_pick = NULL, held_at = ?, undone_at = ?
+                WHERE id = ?
+                """,
+                [.text(iso(date)), .text(iso(date)), .integer(songID)]
+            )
+        }
+    }
+
+    func playlistRemovals() throws -> [PlaylistRemoval] {
+        try db.query("SELECT * FROM playlist_removals ORDER BY rowid").map {
+            PlaylistRemoval(catalogID: $0.string("catalog_id")!, song: MusicAppSong(
+                name: $0.string("name")!, artist: $0.string("artist")!, album: $0.string("album")!
+            ))
+        }
+    }
+
+    func deleteRemoval(catalogID: String) throws {
+        try db.execute("DELETE FROM playlist_removals WHERE catalog_id = ?", [.text(catalogID)])
+    }
+
+    func isMatched(catalogID: String) throws -> Bool {
+        try !db.query("SELECT 1 FROM songs WHERE catalog_id = ? AND status = 'matched'", [.text(catalogID)]).isEmpty
     }
 
     func heldCount(since date: Date?) throws -> Int {
@@ -559,7 +718,8 @@ final class Store {
             catalogAlbum: row.string("catalog_album"),
             matchedBy: row.string("matched_by"),
             candidates: candidates,
-            heldAt: row.string("held_at").flatMap(parseISODate)
+            heldAt: row.string("held_at").flatMap(parseISODate),
+            undoneAt: row.string("undone_at").flatMap(parseISODate)
         )
     }
 

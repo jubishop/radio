@@ -93,6 +93,51 @@ import Testing
         #expect(harness.music.playlists()["Radio"] == ["Come As You Are (Live)"])
     }
 
+    /// The user asked on 2026-10-15 for songs needing review first, with
+    /// Jev's suggestion, then every pick by Jev or the user, newest first,
+    /// each with an undo.
+    @Test func theReviewPageListsSongsToReviewThenEveryDecisionNewestFirst() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On")
+        harness.music.addToCatalog("Nirvana", "Lake of Fire (Live Acoustic)")
+        harness.music.addToCatalog("Pearl Jam", "Last Kiss (Live)")
+        harness.jev.score("Get Ur Freak On", 0.93)
+        harness.jev.score("Lake of Fire (Live Acoustic)", 0.74)
+        harness.play("Missy Elliot", "GET UR FREAK ON", minutesAgo: 4)
+        harness.play("Nirvana", "Lake Of Fire", minutesAgo: 3)
+        harness.play("Pearl Jam", "Last Kiss", minutesAgo: 2)
+        harness.play("Unknown Band", "Demo", minutesAgo: 1)
+        harness.play("Another Band", "Tape")
+        _ = try await harness.radio.run()
+        let held = try await harness.radio.heldSongs()
+        let pearlJam = try #require(held.first { $0.artist == "Pearl Jam" })
+        let unknown = try #require(held.first { $0.artist == "Unknown Band" })
+        harness.clock.advance(hours: 1)
+        _ = try await harness.radio.match(songID: pearlJam.id, choice: .candidate(0))
+        harness.clock.advance(hours: 1)
+        try await harness.radio.ignore(songID: unknown.id)
+        let dashboard = Dashboard(radio: harness.radio)
+
+        let page = text(await dashboard.handle(request("GET", "/review")))
+
+        let order = ["Needs your review", "Another Band – Tape", "Nirvana – Lake Of Fire", "Jev suggests",
+                     "Reviewed", "Unknown Band – Demo", "Ignored by you", "Pearl Jam – Last Kiss", "Matched by you",
+                     "Missy Elliot – GET UR FREAK ON", "Matched by Jev"]
+        let positions = order.map { page.range(of: $0)?.lowerBound }
+        #expect(!positions.contains(nil), "\(zip(order, positions).filter { $0.1 == nil }.map(\.0))")
+        #expect(positions.compactMap { $0 } == positions.compactMap { $0 }.sorted())
+        let missy = try #require(try await harness.radio.reviewedSongs().first { $0.artist == "Missy Elliot" })
+        #expect(page.contains("action=\"/review/\(missy.id)/undo\""))
+
+        let undone = await dashboard.handle(request("POST", "/review/\(missy.id)/undo"))
+
+        #expect(undone.status == 303)
+        #expect(undone.headers["Location"]?.hasPrefix("/review?message=") == true)
+        #expect(try await harness.radio.heldSongs().contains { $0.id == missy.id })
+    }
+
     @Test func signInIsOnlyServedToThisMac() async throws {
         let harness = try Harness()
         try await harness.radio.setCredentials(keyID: "KEY123", teamID: "TEAM456", keyPEM: P256.Signing.PrivateKey().pemRepresentation)

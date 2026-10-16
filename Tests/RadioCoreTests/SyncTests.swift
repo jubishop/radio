@@ -116,6 +116,10 @@ import Testing
         executeSQL([
             "UPDATE songs SET artist = 'Macklemore &amp; Ryan Lewis', key = 'macklemore and amp ryan lewis|cant hold us'",
             "UPDATE plays SET artist = 'Macklemore &amp; Ryan Lewis'",
+            // Schema 6 had none of schema 8's additions.
+            "ALTER TABLE songs DROP COLUMN jev_checked_at", "ALTER TABLE songs DROP COLUMN jev_model",
+            "ALTER TABLE songs DROP COLUMN jev_score", "ALTER TABLE songs DROP COLUMN jev_pick",
+            "ALTER TABLE songs DROP COLUMN undone_at", "DROP TABLE playlist_removals",
             "PRAGMA user_version = 6",
         ], in: harness.home)
         let clock = harness.clock
@@ -163,6 +167,92 @@ import Testing
         _ = try await harness.radio.sync()
 
         #expect(harness.music.playlists()["Radio"] == ["Self-Aware"])
+    }
+
+    @Test func undoingAPickReturnsTheSongToReviewAndTakesItOutOfThePlaylists() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Nirvana", "Lake of Fire (Live at Reading)")
+        harness.music.addToCatalog("Nirvana", "Lake of Fire (Live Acoustic)", album: "MTV Unplugged In New York")
+        harness.jev.score("Lake of Fire (Live at Reading)", 0.95)
+        harness.play("Nirvana", "Lake Of Fire")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["Lake of Fire (Live at Reading)"])
+        let picked = try #require(try await harness.radio.reviewedSongs().first)
+
+        try await harness.radio.undo(songID: picked.id)
+
+        let held = try #require(try await harness.radio.heldSongs().first)
+        #expect(held.id == picked.id && held.suggestion == nil)
+        #expect(try await harness.radio.reviewedSongs().isEmpty)
+        _ = try await harness.radio.match(songID: held.id, choice: .candidate(1))
+        _ = try await harness.radio.sync()
+        #expect(harness.music.playlists()["Radio"] == ["Lake of Fire (Live Acoustic)"])
+        #expect(harness.http.requests("POST https://api.typesafe.ai/").count == 1)
+    }
+
+    @Test func aSongSentBackStaysForReviewUntilPicked() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Nirvana", "Come As You Are (Live)")
+        harness.play("Nirvana", "Come As You Are")
+        // Jev never judges the song, as for one held before Jev.
+        harness.jev.setFailing(true)
+        _ = try await harness.radio.run()
+        harness.jev.setFailing(false)
+        let held = try #require(try await harness.radio.heldSongs().first)
+        _ = try await harness.radio.match(songID: held.id, choice: .candidate(0))
+        _ = try await harness.radio.sync()
+
+        try await harness.radio.undo(songID: held.id)
+        // Candidates the matching rules or Jev would accept on their own.
+        let studio = harness.music.addToCatalog("Nirvana", "Come As You Are", album: "Nevermind")
+        harness.jev.score("Come As You Are", 0.99)
+        let candidates = String(decoding: try JSONEncoder().encode([studio]), as: UTF8.self)
+        executeSQL(["UPDATE songs SET candidates = '\(candidates)'"], in: harness.home)
+        _ = try await harness.radio.sync()
+
+        #expect(try await harness.radio.heldSongs().map(\.id) == [held.id])
+        #expect(harness.music.playlists()["Radio"] == [])
+        #expect(harness.http.requests("POST https://api.typesafe.ai/").count == 1)
+    }
+
+    @Test func undoingAPickSharedWithAnotherSongKeepsItInThePlaylists() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        let studio = harness.music.addToCatalog("Nirvana", "Come As You Are")
+        harness.play("Nirvana", "Come As You Are", minutesAgo: 5)
+        harness.play("Nirvana", "Come As You Are Radio Edit")
+        _ = try await harness.radio.run()
+        let held = try #require(try await harness.radio.heldSongs().first)
+        _ = try await harness.radio.match(songID: held.id, choice: .link(studio.url))
+        _ = try await harness.radio.sync()
+
+        try await harness.radio.undo(songID: held.id)
+        let report = try await harness.radio.sync()
+
+        #expect(report.removed == 0)
+        #expect(harness.music.playlists()["Radio"] == ["Come As You Are"])
+        #expect(try await harness.radio.heldSongs().map(\.id) == [held.id])
+    }
+
+    @Test func undoingAnIgnoreReturnsTheSongToReview() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.play("Unknown Local Band", "Demo Tape")
+        _ = try await harness.radio.run()
+        let held = try #require(try await harness.radio.heldSongs().first)
+        try await harness.radio.ignore(songID: held.id)
+        #expect(try await harness.radio.reviewedSongs().map(\.decision) == [.ignored])
+
+        try await harness.radio.undo(songID: held.id)
+
+        #expect(try await harness.radio.heldSongs().map(\.id) == [held.id])
+        #expect(try await harness.radio.reviewedSongs().isEmpty)
     }
 
     @Test func ignoredSongsAreNeverAdded() async throws {

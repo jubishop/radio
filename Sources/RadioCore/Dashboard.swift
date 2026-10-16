@@ -28,7 +28,8 @@ public struct Dashboard: Sendable {
                 }
                 return .html(Pages.playlist(name: await radio.name(of: kind), entries: try await radio.playlistEntries(kind)))
             case ("GET", 1) where parts[0] == "review":
-                return .html(Pages.review(try await radio.heldSongs(), message: request.query["message"]))
+                return .html(Pages.review(try await radio.heldSongs(), reviewed: try await radio.reviewedSongs(),
+                                          message: request.query["message"]))
             case ("POST", 3) where parts[0] == "review":
                 return await review(songID: Int64(parts[1]), action: parts[2], form: request.form)
             case ("GET", 1) where parts[0] == "auth":
@@ -64,6 +65,9 @@ public struct Dashboard: Sendable {
             case "ignore":
                 try await radio.ignore(songID: songID)
                 message = "Ignored. It won't be added or asked about again."
+            case "undo":
+                try await radio.undo(songID: songID)
+                message = "Sent back for review. If it was matched, it leaves the playlists on the next sync."
             default:
                 return .html(Pages.notFound(), status: 404)
             }

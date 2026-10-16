@@ -79,10 +79,13 @@ shows "sign-in expired". Repeat step 4.
   It shows recent plays, songs just added, feed and sync health, and the
   review queue. It refreshes every minute. Radio serves plain HTTP, so an
   `https://` address fails at once; use `http://`.
-- **Review:** <http://jubi.local:8102/review>, or in Terminal use
+- **Review:** <http://jubi.local:8102/review> lists songs needing review
+  first, with Jev's suggestion when it has one, then every song Jev or you
+  matched or you ignored, newest first, each with an undo. In Terminal, use
   `radio unmatched`, then `radio match 12a`, `radio match 12 <apple-music-link>`,
-  or `radio ignore 12`. A weekly Pushover nudge links to the review page when
-  new songs are waiting.
+  or `radio ignore 12`; `radio reviewed` lists decisions and `radio undo 12`
+  sends one back. A weekly Pushover nudge links to the review page when new
+  songs are waiting.
 - **Playlists:** <http://jubi.local:8102/playlists/radio> and
   <http://jubi.local:8102/playlists/archive> list each playlist's songs with
   the stations that played them. In Music, each song's comment gives its
@@ -112,6 +115,13 @@ delete them in Music when you no longer want them. A later upgrade adds
 already has another playlist named "Radio" or "Radio Archive", rename that
 one, or the dashboard reports that Music.app can't tell which playlist is
 Radio's.
+
+## Jev
+
+Radio reads `JEV_API_KEY` from `~/.env` and asks TypeSafe's Jev about songs
+held back for review; without the key, it doesn't. Keys come from the
+TypeSafe developer console. When Jev fails, the dashboard and `radio status`
+show the error, and held songs wait for the next sync.
 
 ## Alerts
 

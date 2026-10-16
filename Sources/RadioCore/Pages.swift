@@ -18,6 +18,9 @@ enum Pages {
         if let error = status.musicAppError {
             body += "<p class=\"problem\">Music.app can't update the playlists: \(escape(error))</p>"
         }
+        if let error = status.jevError {
+            body += "<p class=\"problem\">Jev can't judge songs held for review: \(escape(error))</p>"
+        }
         body += "</header>"
         if status.stations.isEmpty {
             body += "<p class=\"empty\">No stations yet. Run <code>radio station add alt1021rva</code>.</p>"
@@ -128,51 +131,105 @@ enum Pages {
         }
     }
 
-    static func review(_ songs: [HeldSong], message: String?) -> String {
-        var body = "<header><p><a href=\"/\">← Radio</a></p><h1>Songs to review</h1>"
-        body += "<p class=\"meta\">These didn't match Apple Music closely enough to add on their own. Pick the right version, paste a link to it, or ignore the song.</p></header>"
+    /// Songs that need the user come first, with Jev's suggestion, then
+    /// every decision Jev or the user made, newest first, each with an undo.
+    /// The user asked for this order on 2026-10-15.
+    static func review(_ songs: [HeldSong], reviewed: [ReviewedSong], message: String?) -> String {
+        var body = "<header><p><a href=\"/\">← Radio</a></p><h1>Review</h1>"
+        body += "<p class=\"meta\">First come songs that didn't match Apple Music closely enough to add on their own. "
+            + "Below them is every pick Jev or you made, newest first. Undo sends a song back up here, "
+            + "and a matched song leaves the playlists on the next sync.</p></header>"
         if let message {
             body += "<p class=\"notice\">\(escape(message))</p>"
         }
+        body += "<h2 class=\"group\">Needs your review</h2>"
         if songs.isEmpty {
             body += "<p class=\"empty\">Nothing to review.</p>"
         }
         for song in songs {
-            let plays = "\(song.playCount) play\(song.playCount == 1 ? "" : "s")"
-            body += """
-                <section>
-                  <h2>\(escape(song.artist)) – \(escape(song.title))</h2>
-                  <p class="meta">\(plays) on \(escape(song.stations.joined(separator: ", "))) · last \(escape(displayTime(song.lastPlayedAt))) · <code>radio match \(song.id)</code></p>
-                """
-            if song.candidates.isEmpty {
-                body += "<p class=\"empty\">Apple Music search found nothing.</p>"
-            } else {
-                body += "<ol class=\"candidates\">"
-                for (index, candidate) in song.candidates.enumerated() {
-                    let explicit = candidate.isExplicit ? " <span class=\"badge\">explicit</span>" : ""
-                    body += """
-                        <li><form method="post" action="/review/\(song.id)/match">
-                          <input type="hidden" name="candidate" value="\(index)">
-                          <button>Use \(candidateLetter(index))</button>
-                          \(link(candidate.url, "\(candidate.artistName) – \(candidate.name)"))\(explicit)
-                          <span class="meta">\(escape(candidate.albumName))</span>
-                        </form></li>
-                        """
-                }
-                body += "</ol>"
-            }
-            body += """
-                <form method="post" action="/review/\(song.id)/match" class="row">
-                  <input name="link" type="url" placeholder="Paste an Apple Music song link" required>
-                  <button>Use link</button>
-                </form>
-                <form method="post" action="/review/\(song.id)/ignore" class="row">
-                  <button class="quiet">Ignore this song</button>
-                </form>
-                </section>
-                """
+            body += heldSong(song)
+        }
+        body += "<h2 class=\"group\">Reviewed</h2>"
+        if reviewed.isEmpty {
+            body += "<p class=\"empty\">Nothing yet.</p>"
+        } else {
+            body += "<section><ol class=\"reviewed\">" + reviewed.map(reviewedSong).joined() + "</ol></section>"
         }
         return page(title: "Review · Radio", body: body, refresh: false)
+    }
+
+    /// A held song with its first three candidates and Jev's pick; the rest
+    /// fold away.
+    private static func heldSong(_ song: HeldSong) -> String {
+        let plays = "\(song.playCount) play\(song.playCount == 1 ? "" : "s")"
+        var html = """
+            <section>
+              <h2>\(escape(song.artist)) – \(escape(song.title))</h2>
+              <p class="meta">\(plays) on \(escape(song.stations.joined(separator: ", "))) · last \(escape(displayTime(song.lastPlayedAt))) · <code>radio match \(song.id)</code></p>
+            """
+        if let suggestion = song.suggestion {
+            let candidate = song.candidates[suggestion.candidate]
+            html += "<p class=\"suggestion\">Jev suggests <strong>\(candidateLetter(suggestion.candidate))</strong>, "
+                + "\(escape(candidate.artistName)) – \(escape(candidate.name)) (\(score(suggestion.score)))</p>"
+        }
+        if song.candidates.isEmpty {
+            html += "<p class=\"empty\">No Apple Music candidates.</p>"
+        } else {
+            let shown = song.candidates.indices.filter { $0 < 3 || $0 == song.suggestion?.candidate }
+            let more = song.candidates.indices.filter { !shown.contains($0) }
+            html += "<ol class=\"candidates\">" + shown.map { candidate(song, $0) }.joined() + "</ol>"
+            if !more.isEmpty {
+                html += "<details><summary>\(more.count) more</summary><ol class=\"candidates\">"
+                    + more.map { candidate(song, $0) }.joined() + "</ol></details>"
+            }
+        }
+        return html + """
+            <form method="post" action="/review/\(song.id)/match" class="row">
+              <input name="link" type="url" placeholder="Paste an Apple Music song link" required>
+              <button>Use link</button>
+            </form>
+            <form method="post" action="/review/\(song.id)/ignore" class="row">
+              <button class="quiet">Ignore this song</button>
+            </form>
+            </section>
+            """
+    }
+
+    /// With a suggestion, only Jev's pick keeps the prominent button.
+    private static func candidate(_ song: HeldSong, _ index: Int) -> String {
+        let candidate = song.candidates[index]
+        let explicit = candidate.isExplicit ? " <span class=\"badge\">explicit</span>" : ""
+        let isPick = song.suggestion?.candidate == index
+        let quiet = song.suggestion != nil && !isPick ? " class=\"quiet\"" : ""
+        return """
+            <li><form method="post" action="/review/\(song.id)/match">
+              <input type="hidden" name="candidate" value="\(index)">
+              <button\(quiet)>Use \(candidateLetter(index))</button>
+              \(link(candidate.url, "\(candidate.artistName) – \(candidate.name)"))\(explicit)\(isPick ? " <span class=\"badge good\">Jev's pick</span>" : "")
+              <span class="meta">\(escape(candidate.albumName))</span>
+            </form></li>
+            """
+    }
+
+    private static func reviewedSong(_ song: ReviewedSong) -> String {
+        let label = switch song.decision {
+        case .jev(let value, let model): "Matched by Jev · \(score(value)) · \(escape(model))"
+        case .manual: "Matched by you"
+        case .ignored: "Ignored by you"
+        }
+        let pick = song.catalog.map { " → " + link($0.url, "\($0.artistName) – \($0.name)") } ?? ""
+        return """
+            <li><form method="post" action="/review/\(song.id)/undo">
+              <div><strong>\(escape(song.artist)) – \(escape(song.title))</strong>\(pick)
+                <br><span class="meta">\(label) · \(escape(displayTime(song.decidedAt)))</span></div>
+              <button class="quiet">Undo</button>
+            </form></li>
+            """
+    }
+
+    /// A Jev score, such as "0.93".
+    private static func score(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(2)))
     }
 
     static func signIn(developerToken: String) -> String {
@@ -282,6 +339,9 @@ enum Pages {
         .badge { font-size: 12px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
         .badge.good { color: var(--good); border-color: currentColor; } .badge.bad { color: var(--bad); border-color: currentColor; }
         .candidates li { padding: 8px 0; } .row { display: flex; gap: 8px; margin-top: 8px; }
+        h2.group { margin: 28px 0 0; } .suggestion { margin: 8px 0; }
+        details summary { margin-top: 8px; color: var(--muted); cursor: pointer; }
+        .reviewed form { display: flex; align-items: center; gap: 12px; } .reviewed form div { flex: 1; min-width: 0; }
         input { flex: 1; min-width: 0; padding: 6px 8px; font: inherit; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
         button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
         button.quiet { background: none; color: var(--muted); border-color: var(--line); }
