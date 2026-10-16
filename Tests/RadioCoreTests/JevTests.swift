@@ -111,6 +111,24 @@ import Testing
         #expect(harness.music.playlists()["Radio"] == ["Get Ur Freak On"])
     }
 
+    /// Copies of one recording score about the same, so the first in Apple's
+    /// search order, usually the original release, wins. Seen 2026-10-15:
+    /// Usher went to a trimmed copy on a compilation instead of the EP.
+    @Test func theFirstSurePickInSearchOrderWins() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        let original = harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On", album: "Miss E... So Addictive")
+        harness.music.addToCatalog("Missy Elliott", "Get Ur Freak On (Party Hits)", album: "Party Hits")
+        harness.jev.score("Get Ur Freak On", 0.91)
+        harness.jev.score("Get Ur Freak On (Party Hits)", 0.93)
+        harness.play("Missy Elliot", "GET UR FREAK ON")
+
+        _ = try await harness.radio.run()
+
+        #expect(try await harness.radio.reviewedSongs().first?.catalog?.id == original.id)
+    }
+
     @Test func jevIsAskedAboutEveryCandidateWithTheNewestModel() async throws {
         let harness = try Harness()
         try await harness.signIn()

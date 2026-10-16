@@ -366,7 +366,12 @@ top ten candidates instead of three. The review page shows three and folds
 the rest away, keeping Jev's pick in view.
 
 - **Score 0.9 or higher:** Radio adds that candidate, as matched by Jev. Among
-  the candidates scoring that high, it prefers an explicit version.
+  the candidates scoring that high, it prefers an explicit version, then the
+  first in Apple's search order. Those are usually copies of one recording
+  that score about the same, and Apple lists the original release first. The
+  user agreed to this on 2026-10-15, after Jev's first live pick, Usher's "DJ
+  Got Us Fallin' In Love", went to a trimmed copy on a compilation instead of
+  the EP.
 - **From 0.6 up to 0.9:** the review page and `radio unmatched` show it as
   Jev's suggestion.
 - **Below 0.6:** the song waits for review as before.

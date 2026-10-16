@@ -309,9 +309,11 @@ public actor Radio {
     }
 
     /// Asks Jev about each held song it hasn't judged. Jev adds a song when
-    /// it's sure of a candidate, preferring an explicit version among those
-    /// it's sure of, and otherwise records its pick for review. After a
-    /// failure, the rest wait for the next sync.
+    /// it's sure of a candidate, and otherwise records its pick for review.
+    /// Among the candidates it's sure of, often copies of one recording that
+    /// score about the same, an explicit version wins, then the first in
+    /// Apple's search order, usually the original release. After a failure,
+    /// the rest wait for the next sync.
     private func judgeHeldSongs(_ report: inout SyncReport) async throws {
         guard let jev else { return }
         for item in try store.songsToJudge() {
@@ -329,7 +331,7 @@ public actor Radio {
             let scores = verdict.scores
             let best = scores.indices.max { scores[$0] < scores[$1] }!
             let sure = scores.indices.filter { scores[$0] >= Self.jevAddScore }
-            let pick = sure.filter { song.candidates[$0].isExplicit }.max { scores[$0] < scores[$1] } ?? best
+            let pick = sure.first { song.candidates[$0].isExplicit } ?? sure.first ?? best
             try store.recordJevVerdict(songID: song.id, model: verdict.model, score: scores[pick], pick: pick, at: now())
             if scores[pick] >= Self.jevAddScore {
                 try store.markMatched(songID: song.id, catalog: song.candidates[pick], by: "jev", at: now())
