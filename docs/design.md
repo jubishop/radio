@@ -527,7 +527,7 @@ The tradeoffs:
 - Music.app finds the song's track the way placing does, so a comment can
   land on another version with the same title and artist.
 
-### Send a weekly review reminder by Pushover and email
+### Send a daily review reminder by Pushover and email
 
 Accepted 2026-10-13. Once a week, Radio sends a Pushover message if songs were
 held back since the last nudge. It says how many and links to
@@ -539,15 +539,19 @@ would otherwise remember to check.
 Changed 2026-10-19. The user asked for an email that lists every song needing
 review and links to the review page. They chose to keep it weekly rather than
 daily, and to send it alongside the Pushover message rather than replace it.
+Later that day, they asked for both to come daily instead.
 
-- **When:** a week after the last check, if any song is waiting for review,
-  however long it has waited. Before, a song held more than a week earlier
-  never came up again.
+- **When:** once a day, if any song is waiting for review, however long it has
+  waited. Before, a song held more than a week earlier never came up again.
+  Each day starts a whole number of days after the first check, so the
+  reminder keeps its time of day: a late run, or a day without runs, doesn't
+  make later reminders late. The days are counted in fixed 24-hour steps, so
+  the local time moves an hour when daylight saving time starts or ends.
 - **What:** the push gives the count. The email, sent through Resend from
   `Radio <radio@jubishop.com>` to `EMAIL_TO`, lists each song with its plays,
   stations, latest play, and Jev's suggestion. Both link to
   `http://jubi.local:8102/review`.
-- **Failures:** each service counts as done for the week once it accepts its
+- **Failures:** each service counts as done for the day once it accepts its
   message. A refused email is retried on the next run without repeating the
   push, and a service whose keys are missing is skipped without holding up
   the other. `RESEND_API_KEY` and `EMAIL_TO` stay in `~/.env`, since other
@@ -607,7 +611,7 @@ explicitly approved them.
   - `radio station add <slug> [--source audacy|iheart|hubbard]` and
     `radio station list`
   - `radio poll` and `radio sync`
-  - `radio run`, which polls, syncs, and handles alerts and the weekly review reminder
+  - `radio run`, which polls, syncs, and handles alerts and the daily review reminder
   - `radio serve`
   - `radio unmatched`, `radio match`, and `radio ignore`
   - `radio credentials`

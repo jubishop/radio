@@ -172,7 +172,7 @@ enum Pages {
         return page(title: "Review · Radio", body: body, refresh: false)
     }
 
-    /// The weekly reminder's email, as plain text and HTML: every song
+    /// The daily reminder's email, as plain text and HTML: every song
     /// waiting for review, with Jev's suggestion, and a link to the review
     /// page, which opens only on the home network.
     static func reviewEmail(_ songs: [HeldSong], summary: String, reviewURL: String) -> (text: String, html: String) {

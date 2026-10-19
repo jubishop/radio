@@ -85,28 +85,28 @@ import Testing
         #expect(harness.music.playlists()["Radio"] == ["Uprising"])
     }
 
-    @Test func theWeeklyReminderCoversEverySongWaitingForReview() async throws {
+    @Test func theDailyReminderCoversEverySongWaitingForReview() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
         _ = try await harness.radio.run()
 
-        harness.clock.advance(days: 3)
+        harness.clock.advance(hours: 12)
         harness.play("Unknown Band", "First")
         harness.play("Unknown Band", "Second", minutesAgo: 1)
         _ = try await harness.radio.run()
         #expect(harness.pushes.isEmpty)
         #expect(harness.emails.isEmpty)
 
-        harness.clock.advance(days: 4)
+        harness.clock.advance(hours: 12)
         _ = try await harness.radio.run()
         #expect(harness.pushes == ["Radio: songs to review"])
         let message = String(decoding: try #require(harness.http.requests("POST https://api.pushover.net/").last?.body), as: UTF8.self)
         #expect(message.contains("2%20songs%20need"))
         #expect(harness.emails.map { $0["subject"] as? String } == ["Radio: 2 songs to review"])
 
-        // Songs left waiting come up again the next week.
-        harness.clock.advance(days: 7)
+        // Songs left waiting come up again the next day.
+        harness.clock.advance(days: 1)
         _ = try await harness.radio.run()
         #expect(harness.pushes.count == 2)
         #expect(harness.emails.count == 2)
@@ -114,10 +114,35 @@ import Testing
         for song in try await harness.radio.heldSongs() {
             try await harness.radio.ignore(songID: song.id)
         }
-        harness.clock.advance(days: 7)
+        harness.clock.advance(days: 1)
         _ = try await harness.radio.run()
         #expect(harness.pushes.count == 2)
         #expect(harness.emails.count == 2)
+    }
+
+    /// A late run, or a day without runs, doesn't make later reminders late.
+    @Test func theDailyReminderKeepsItsTimeOfDay() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.play("Unknown Band", "First")
+        _ = try await harness.radio.run()
+
+        harness.clock.advance(hours: 24.25)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.count == 1)
+        harness.clock.advance(hours: 23.75)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.count == 2)
+
+        harness.clock.advance(days: 2.5)
+        _ = try await harness.radio.run()
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.count == 3)
+        harness.clock.advance(hours: 11.75)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.count == 4)
     }
 
     @Test func theReviewEmailListsEachSongAndLinksToTheReviewPage() async throws {
@@ -129,7 +154,7 @@ import Testing
         harness.play("Nirvana", "Lake Of Fire", minutesAgo: 5)
         harness.play("Simon & <Unknown>", "Nobody Knows")
         _ = try await harness.radio.run()
-        harness.clock.advance(days: 7)
+        harness.clock.advance(days: 1)
         _ = try await harness.radio.run()
 
         let email = try #require(harness.emails.first)
@@ -155,7 +180,7 @@ import Testing
         _ = try await harness.radio.run()
 
         harness.http.on("POST https://api.resend.com/") { _ in json(["message": "unavailable"], status: 500) }
-        harness.clock.advance(days: 7)
+        harness.clock.advance(days: 1)
         await #expect(throws: (any Error).self) { try await harness.radio.run() }
 
         harness.http.on("POST https://api.resend.com/") { _ in json(["id": "email-2"]) }
@@ -166,7 +191,7 @@ import Testing
         #expect(harness.emails.count == 2)
     }
 
-    /// Without one service's keys, the other still reminds once a week.
+    /// Without one service's keys, the other still reminds once a day.
     @Test(arguments: [true, false]) func eitherReminderWorksAlone(pushover: Bool) async throws {
         let harness = try Harness(pushover: pushover, email: !pushover)
         try await harness.signIn()
@@ -174,11 +199,11 @@ import Testing
         harness.play("Unknown Band", "First")
         _ = try await harness.radio.run()
 
-        harness.clock.advance(days: 7)
+        harness.clock.advance(days: 1)
         _ = try await harness.radio.run()
         harness.clock.advance(hours: 0.25)
         _ = try await harness.radio.run()
-        harness.clock.advance(days: 7)
+        harness.clock.advance(days: 1)
         _ = try await harness.radio.run()
 
         #expect(harness.http.requests("POST https://api.pushover.net/").count == (pushover ? 2 : 0))

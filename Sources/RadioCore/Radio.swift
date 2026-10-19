@@ -109,7 +109,7 @@ public actor Radio {
     /// Alert when Apple Music has rejected the sign-in for this long. A new
     /// MusicKit key answers 401 intermittently for minutes while it rolls out.
     static let authAlertDelay: TimeInterval = 60 * 60
-    static let nudgeInterval: TimeInterval = 7 * 24 * 60 * 60
+    static let nudgeInterval: TimeInterval = 24 * 60 * 60
     /// Apple Music candidates kept for each held song, for Jev and review.
     static let storedCandidates = 10
     /// Jev adds a held song when it scores a candidate at least this high,
@@ -390,26 +390,29 @@ public actor Radio {
         if sent { try store.setMetaDate("auth.alert_sent_at", now()) }
     }
 
-    /// Once a week, while songs wait for review, sends a push and an email
-    /// that lists them. Each counts as sent once its service accepts it, so a
-    /// failed email is retried without repeating the push; a service without
-    /// keys is skipped.
+    /// Once a day, while songs wait for review, sends a push and an email
+    /// that lists them. Each day starts a whole number of days after the
+    /// first check, so a late run doesn't make the next reminder late. Each
+    /// counts as sent once its service accepts it, so a failed email is
+    /// retried without repeating the push; a service without keys is skipped.
     private func sendReviewReminder() async throws {
         guard let lastCheck = try store.metaDate("nudge.last_check_at") else {
             try store.setMetaDate("nudge.last_check_at", now())
             return
         }
-        guard now().timeIntervalSince(lastCheck) >= Self.nudgeInterval else { return }
+        let days = (now().timeIntervalSince(lastCheck) / Self.nudgeInterval).rounded(.down)
+        guard days >= 1 else { return }
+        let due = lastCheck + Self.nudgeInterval
         let songs = try store.heldSongs()
         if !songs.isEmpty {
             let one = songs.count == 1
             let summary = "\(one ? "1 song needs" : "\(songs.count) songs need") review before \(one ? "it" : "they") can join the playlists."
             let reviewURL = "\(dashboardURL)/review"
-            if try !sentSince(lastCheck, "nudge.push_sent_at"),
+            if try !sentSince(due, "nudge.push_sent_at"),
                try await notifier.send(title: "Radio: songs to review", message: summary, link: reviewURL) {
                 try store.setMetaDate("nudge.push_sent_at", now())
             }
-            if let mailer, try !sentSince(lastCheck, "nudge.email_sent_at") {
+            if let mailer, try !sentSince(due, "nudge.email_sent_at") {
                 let email = Pages.reviewEmail(songs, summary: summary, reviewURL: reviewURL)
                 if try await mailer.send(subject: "Radio: \(one ? "1 song" : "\(songs.count) songs") to review",
                                          text: email.text, html: email.html) {
@@ -417,11 +420,11 @@ public actor Radio {
                 }
             }
         }
-        try store.setMetaDate("nudge.last_check_at", now())
+        try store.setMetaDate("nudge.last_check_at", lastCheck + days * Self.nudgeInterval)
     }
 
     private func sentSince(_ date: Date, _ key: String) throws -> Bool {
-        try store.metaDate(key).map { $0 > date } ?? false
+        try store.metaDate(key).map { $0 >= date } ?? false
     }
 
     // MARK: Review

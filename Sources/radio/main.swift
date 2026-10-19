@@ -14,7 +14,7 @@ let usage = """
       station list            List followed stations
 
     Scheduled work
-      run                     Poll, sync, and send alerts and the weekly review
+      run                     Poll, sync, and send alerts and the daily review
                               reminder (launchd runs this)
       poll                    Log new plays from every station
       sync                    Match new songs and update the playlists

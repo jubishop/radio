@@ -86,7 +86,7 @@ shows "sign-in expired". Repeat step 4.
   matched or you ignored, newest first, each with an undo. In Terminal, use
   `radio unmatched`, then `radio match 12a`, `radio match 12 <apple-music-link>`,
   or `radio ignore 12`; `radio reviewed` lists decisions and `radio undo 12`
-  sends one back. Once a week, while any song is waiting, Radio sends a
+  sends one back. Once a day, while any song is waiting, Radio sends a
   Pushover message and an email that lists those songs, and both link to the
   review page.
 - **Playlists:** <http://jubi.local:8102/playlists/radio> and
@@ -138,12 +138,13 @@ alerts:
   403 responses both count as a rejection. Brief 401s happen, especially in
   the first minutes after a new MusicKit key is created.
 
-Once a week, if any song is waiting for review, Radio also sends a review
-reminder: a Pushover message with the count, and an email from
-`radio@jubishop.com` that lists each song with its plays, stations, and Jev's
-suggestion. Both link to the review page. If Resend refuses the email, that
-run fails in the run log, and the next run retries the email without
-repeating the push. Without one service's keys, the other still goes out.
+Once a day, if any song is waiting for review, Radio also sends a review
+reminder, at about the time of day Radio first ran: a Pushover message with
+the count, and an email from `radio@jubishop.com` that lists each song with
+its plays, stations, and Jev's suggestion. Both link to the review page. If
+Resend refuses the email, that run fails in the run log, and the next run
+retries the email without repeating the push. Without one service's keys, the
+other still goes out.
 
 ## Stop or remove
 
