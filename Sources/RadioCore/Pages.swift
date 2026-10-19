@@ -174,10 +174,10 @@ enum Pages {
 
     /// The daily reminder's email, as plain text and HTML: every song
     /// waiting for review, with Jev's suggestion, and a link to the review
-    /// page, which opens only on the home network.
+    /// page.
     static func reviewEmail(_ songs: [HeldSong], summary: String, reviewURL: String) -> (text: String, html: String) {
         let them = songs.count == 1 ? "it" : "them"
-        var text = "\(summary)\n\nReview \(them) at \(reviewURL) from the home network.\n"
+        var text = "\(summary)\n\nReview \(them) at \(reviewURL).\n"
         var items = ""
         for song in songs {
             let plays = "\(song.playCount) play\(song.playCount == 1 ? "" : "s")"
@@ -197,8 +197,7 @@ enum Pages {
             <html lang="en">
             <body style="margin:0;padding:16px;font:15px/1.45 -apple-system,system-ui,sans-serif">
             <p>\(escape(summary))</p>
-            <p><a href="\(escape(reviewURL))" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#4f46e5;color:#fff;text-decoration:none">Review \(them)</a>
-              <span style="color:#656d76">from the home network</span></p>
+            <p><a href="\(escape(reviewURL))" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#4f46e5;color:#fff;text-decoration:none">Review \(them)</a></p>
             <ul style="padding-left:20px">\(items)</ul>
             </body>
             </html>

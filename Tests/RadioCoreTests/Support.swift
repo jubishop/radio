@@ -498,7 +498,7 @@ struct Harness {
     let radio: Radio
 
     init(pushover: Bool = true, email: Bool = true, jevAPIKey: String? = "jev-key", playlistLimit: Int = 100,
-         archiveLimit: Int = 10_000, http: FakeHTTP = FakeHTTP()) throws {
+         archiveLimit: Int = 10_000, dashboardURL: String? = nil, http: FakeHTTP = FakeHTTP()) throws {
         self.http = http
         audacy = FakeAudacy(http: http)
         iheart = FakeIHeart(http: http)
@@ -521,6 +521,7 @@ struct Harness {
             jevAPIKey: jevAPIKey,
             playlistLimit: playlistLimit,
             archiveLimit: archiveLimit,
+            dashboardURL: dashboardURL,
             now: { clock.now }
         )
     }
@@ -535,10 +536,14 @@ struct Harness {
         audacy.play(artist, title, on: feedID, at: clock.now.addingTimeInterval(-minutesAgo * 60))
     }
 
-    var pushes: [String] {
+    var pushes: [String] { pushFields("title") }
+
+    var pushLinks: [String] { pushFields("url") }
+
+    private func pushFields(_ name: String) -> [String] {
         http.requests("POST https://api.pushover.net/").map { request in
             let fields = URLComponents(string: "?" + String(decoding: request.body ?? Data(), as: UTF8.self))?.queryItems ?? []
-            return fields.first { $0.name == "title" }?.value ?? ""
+            return fields.first { $0.name == name }?.value ?? ""
         }
     }
 

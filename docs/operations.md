@@ -146,6 +146,16 @@ Resend refuses the email, that run fails in the run log, and the next run
 retries the email without repeating the push. Without one service's keys, the
 other still goes out.
 
+Alerts and reminders link to `RADIO_DASHBOARD_URL`, which `bin/deploy` reads
+from `.env` in the checkout it runs from. Git ignores that file, so the
+address stays out of this public repository. Set it to the Mac's full
+Tailscale name, such as
+`RADIO_DASHBOARD_URL=http://mac-mini.tail1234.ts.net:8102`, so the links open
+on any device on the tailnet, then run `bin/deploy`. Without it, they link to
+`http://jubi.local:8102`, which opens only on the home network. The sign-in
+alert still links to `http://localhost:8102/auth`, since sign-in works only on
+the Mac itself.
+
 ## Stop or remove
 
 ```sh

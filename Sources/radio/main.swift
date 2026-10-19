@@ -38,7 +38,8 @@ let usage = """
 
     RADIO_HOME overrides ~/Library/Application Support/Radio. RADIO_ENV_FILE,
     ~/.env by default, holds PUSHOVER_USER_KEY, PUSHOVER_API_KEY,
-    RESEND_API_KEY, EMAIL_TO, and JEV_API_KEY.
+    RESEND_API_KEY, EMAIL_TO, and JEV_API_KEY. RADIO_DASHBOARD_URL, by default
+    http://jubi.local:8102, is where alerts link.
     """
 
 struct UsageError: Error, CustomStringConvertible {
@@ -67,7 +68,8 @@ func makeRadio() throws -> Radio {
         notifier: PushoverNotifier(http: http, envFile: envFile),
         mailer: ResendMailer(http: http, envFile: envFile),
         musicApp: ScriptedMusicApp(),
-        jevAPIKey: readEnvFile(at: envFile)["JEV_API_KEY"]
+        jevAPIKey: readEnvFile(at: envFile)["JEV_API_KEY"],
+        dashboardURL: environment["RADIO_DASHBOARD_URL"]
     )
 }
 

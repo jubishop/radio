@@ -22,6 +22,22 @@ else
 fi
 mv -f "$bin_dir/radio.new" "$bin_dir/radio"
 
+# The checkout's .env, which Git ignores, can set RADIO_DASHBOARD_URL, where
+# alerts link, so a private address stays out of this public repository.
+dashboard_url=""
+if [ -f "$root/.env" ]; then
+  dashboard_url=$(sed -n 's/^RADIO_DASHBOARD_URL=//p' "$root/.env" | tail -n 1 | sed "s/^[\"']//; s/[\"']\$//")
+fi
+environment=""
+if [ -n "$dashboard_url" ]; then
+  environment="  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RADIO_DASHBOARD_URL</key>
+    <string>$(printf '%s' "$dashboard_url" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')</string>
+  </dict>
+"
+fi
+
 # write_agent LABEL SCHEDULE_XML ARGUMENT...
 write_agent() {
   label=$1
@@ -44,7 +60,7 @@ write_agent() {
     <string>$bin_dir/radio</string>
 $arguments  </array>
 $schedule
-  <key>StandardOutPath</key>
+$environment  <key>StandardOutPath</key>
   <string>$log_dir/$label.log</string>
   <key>StandardErrorPath</key>
   <string>$log_dir/$label.log</string>
@@ -78,4 +94,4 @@ write_agent com.jubishop.radio.serve "  <key>KeepAlive</key>
   <true/>" serve
 
 echo "Installed $bin_dir/radio and loaded com.jubishop.radio.run and com.jubishop.radio.serve."
-echo "Logs: $log_dir. Dashboard: http://jubi.local:8102"
+echo "Logs: $log_dir. Alerts link to ${dashboard_url:-http://jubi.local:8102}."

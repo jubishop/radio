@@ -473,6 +473,14 @@ plain BSD socket did. A client that tries IPv6 first, such as a browser
 opening `localhost` or `jubi.local`, is refused at once and falls back to
 IPv4.
 
+Changed 2026-10-19. The user asked for alert links to use the Tailscale name,
+kept in a file in the checkout that Git ignores. `bin/deploy` reads
+`RADIO_DASHBOARD_URL` from the checkout's `.env` and sets it in both
+LaunchAgents' environment. Without it, links fall back to
+`http://jubi.local:8102`. The sign-in alert still links to `localhost`, since
+sign-in works only on the Mac, and the review email no longer says its link
+opens only on the home network.
+
 ### Make the page a home-network activity dashboard
 
 Accepted 2026-10-13. The user asked for a live site showing what has been
@@ -551,8 +559,8 @@ Later that day, they asked for both to come daily instead.
   starts or ends.
 - **What:** the push gives the count. The email, sent through Resend from
   `Radio <radio@jubishop.com>` to `EMAIL_TO`, lists each song with its plays,
-  stations, latest play, and Jev's suggestion. Both link to
-  `http://jubi.local:8102/review`.
+  stations, latest play, and Jev's suggestion. Both link to the review page
+  at [`RADIO_DASHBOARD_URL`](#open-the-dashboard-over-tailscale).
 - **Failures:** each service counts as done for the day once it accepts its
   message. A refused email is retried on the next run without repeating the
   push, and a service whose keys are missing is skipped without holding up

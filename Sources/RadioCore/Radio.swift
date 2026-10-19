@@ -100,6 +100,8 @@ public actor Radio {
     public nonisolated let playlistLimit: Int
     /// "Radio Archive" keeps this many.
     public nonisolated let archiveLimit: Int
+    /// Where alerts and reminders link. `bin/deploy` sets it from the
+    /// checkout's `.env`; without one, it's `http://jubi.local:8102`.
     public nonisolated let dashboardURL: String
     public nonisolated let signInURL: String
 
@@ -128,7 +130,7 @@ public actor Radio {
         jevAPIKey: String? = nil,
         playlistLimit: Int = 100,
         archiveLimit: Int = 10_000,
-        dashboardURL: String = "http://jubi.local:8102",
+        dashboardURL: String? = nil,
         signInURL: String = "http://localhost:8102/auth",
         now: @escaping @Sendable () -> Date = Date.init
     ) throws {
@@ -144,7 +146,7 @@ public actor Radio {
         self.jev = jevAPIKey.flatMap { $0.isEmpty ? nil : Jev(http: http, apiKey: $0) }
         self.playlistLimit = playlistLimit
         self.archiveLimit = archiveLimit
-        self.dashboardURL = dashboardURL
+        self.dashboardURL = dashboardURL.flatMap { $0.isEmpty ? nil : $0 } ?? "http://jubi.local:8102"
         self.signInURL = signInURL
         self.now = now
     }

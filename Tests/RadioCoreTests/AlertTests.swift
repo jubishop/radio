@@ -192,6 +192,26 @@ import Testing
         #expect(!html.contains("<Unknown>"))
     }
 
+    @Test func alertsLinkToTheConfiguredDashboard() async throws {
+        let dashboard = "http://mac-mini.tail1234.ts.net:8102"
+        let harness = try Harness(dashboardURL: dashboard)
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.play("Unknown Band", "First")
+        _ = try await harness.radio.run()
+        harness.audacy.setFailing("101-1041", true)
+        harness.clock.advance(hours: 2)
+        _ = try await harness.radio.run()
+        harness.clock.advance(hours: 22)
+        _ = try await harness.radio.run()
+
+        #expect(harness.pushes == ["Radio: Alt 102.1 feed is down", "Radio: songs to review"])
+        #expect(harness.pushLinks == [dashboard, "\(dashboard)/review"])
+        let email = try #require(harness.emails.first)
+        #expect((email["text"] as? String)?.contains("Review it at \(dashboard)/review.\n") == true)
+        #expect((email["html"] as? String)?.contains("href=\"\(dashboard)/review\"") == true)
+    }
+
     @Test func aFailedEmailIsRetriedWithoutRepeatingThePush() async throws {
         let harness = try Harness()
         try await harness.signIn()
