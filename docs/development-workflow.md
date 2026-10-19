@@ -41,7 +41,7 @@ directory, so they never touch the live database or Apple Music.
 
 When running the CLI from a checkout, set `RADIO_HOME` to a scratch directory
 and `RADIO_ENV_FILE=/dev/null` so it uses its own database and sends no
-Pushover alerts:
+Pushover alerts or email:
 
 ```sh
 RADIO_HOME=/tmp/radio-dev RADIO_ENV_FILE=/dev/null swift run radio poll

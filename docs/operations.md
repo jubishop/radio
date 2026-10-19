@@ -84,8 +84,9 @@ shows "sign-in expired". Repeat step 4.
   matched or you ignored, newest first, each with an undo. In Terminal, use
   `radio unmatched`, then `radio match 12a`, `radio match 12 <apple-music-link>`,
   or `radio ignore 12`; `radio reviewed` lists decisions and `radio undo 12`
-  sends one back. A weekly Pushover nudge links to the review page when new
-  songs are waiting.
+  sends one back. Once a week, while any song is waiting, Radio sends a
+  Pushover message and an email that lists those songs, and both link to the
+  review page.
 - **Playlists:** <http://jubi.local:8102/playlists/radio> and
   <http://jubi.local:8102/playlists/archive> list each playlist's songs with
   the stations that played them. In Music, each song's comment gives its
@@ -125,14 +126,22 @@ show the error, and held songs wait for the next sync.
 
 ## Alerts
 
-Radio reads `PUSHOVER_USER_KEY` and `PUSHOVER_API_KEY` from `~/.env`. It sends:
+Radio reads `PUSHOVER_USER_KEY` and `PUSHOVER_API_KEY` for Pushover, and
+`RESEND_API_KEY` and `EMAIL_TO` for email, from `~/.env`. It sends Pushover
+alerts:
 
-- one alert when a station's feed has failed for two hours, because the feed
-  keeps only about four hours of plays;
-- one alert when Apple Music has rejected the sign-in for an hour. Apple's 401
-  and 403 responses both count as a rejection. Brief 401s happen, especially in
-  the first minutes after a new MusicKit key is created;
-- a weekly nudge when songs were held back for review that week.
+- one when a station's feed has failed for two hours, because the feed keeps
+  only about four hours of plays;
+- one when Apple Music has rejected the sign-in for an hour. Apple's 401 and
+  403 responses both count as a rejection. Brief 401s happen, especially in
+  the first minutes after a new MusicKit key is created.
+
+Once a week, if any song is waiting for review, Radio also sends a review
+reminder: a Pushover message with the count, and an email from
+`radio@jubishop.com` that lists each song with its plays, stations, and Jev's
+suggestion. Both link to the review page. If Resend refuses the email, that
+run fails in the run log, and the next run retries the email without
+repeating the push. Without one service's keys, the other still goes out.
 
 ## Stop or remove
 

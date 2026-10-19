@@ -14,7 +14,8 @@ let usage = """
       station list            List followed stations
 
     Scheduled work
-      run                     Poll, sync, and send alerts (launchd runs this)
+      run                     Poll, sync, and send alerts and the weekly review
+                              reminder (launchd runs this)
       poll                    Log new plays from every station
       sync                    Match new songs and update the playlists
       serve [--port 8102]     Serve the dashboard (launchd keeps this running)
@@ -36,8 +37,8 @@ let usage = """
       export [--station SLUG] Write every logged play as CSV
 
     RADIO_HOME overrides ~/Library/Application Support/Radio. RADIO_ENV_FILE,
-    ~/.env by default, holds PUSHOVER_USER_KEY, PUSHOVER_API_KEY, and
-    JEV_API_KEY.
+    ~/.env by default, holds PUSHOVER_USER_KEY, PUSHOVER_API_KEY,
+    RESEND_API_KEY, EMAIL_TO, and JEV_API_KEY.
     """
 
 struct UsageError: Error, CustomStringConvertible {
@@ -64,6 +65,7 @@ func makeRadio() throws -> Radio {
         http: http,
         sources: [AudacySource(http: http), IHeartSource(http: http), HubbardSource(http: http)],
         notifier: PushoverNotifier(http: http, envFile: envFile),
+        mailer: ResendMailer(http: http, envFile: envFile),
         musicApp: ScriptedMusicApp(),
         jevAPIKey: readEnvFile(at: envFile)["JEV_API_KEY"]
     )

@@ -497,8 +497,8 @@ struct Harness {
     let home: RadioHome
     let radio: Radio
 
-    init(pushover: Bool = true, jevAPIKey: String? = "jev-key", playlistLimit: Int = 100, archiveLimit: Int = 10_000,
-         http: FakeHTTP = FakeHTTP()) throws {
+    init(pushover: Bool = true, email: Bool = true, jevAPIKey: String? = "jev-key", playlistLimit: Int = 100,
+         archiveLimit: Int = 10_000, http: FakeHTTP = FakeHTTP()) throws {
         self.http = http
         audacy = FakeAudacy(http: http)
         iheart = FakeIHeart(http: http)
@@ -507,6 +507,7 @@ struct Harness {
         music = FakeAppleMusic(http: http)
         musicApp = FakeMusicApp(music: music)
         http.on("POST https://api.pushover.net/") { _ in json(["status": 1]) }
+        http.on("POST https://api.resend.com/") { _ in json(["id": "email-1"]) }
         home = RadioHome(directory: FileManager.default.temporaryDirectory
             .appendingPathComponent("radio-tests-\(UUID().uuidString)"))
         let clock = clock
@@ -515,6 +516,7 @@ struct Harness {
             http: http,
             sources: [AudacySource(http: http), IHeartSource(http: http), HubbardSource(http: http)],
             notifier: PushoverNotifier(http: http, userKey: pushover ? "user" : nil, apiKey: pushover ? "app" : nil),
+            mailer: ResendMailer(http: http, apiKey: email ? "resend-key" : nil, recipient: email ? "me@example.com" : nil),
             musicApp: musicApp,
             jevAPIKey: jevAPIKey,
             playlistLimit: playlistLimit,
@@ -537,6 +539,13 @@ struct Harness {
         http.requests("POST https://api.pushover.net/").map { request in
             let fields = URLComponents(string: "?" + String(decoding: request.body ?? Data(), as: UTF8.self))?.queryItems ?? []
             return fields.first { $0.name == "title" }?.value ?? ""
+        }
+    }
+
+    /// Each email request's JSON body, including ones Resend refused.
+    var emails: [[String: Any]] {
+        http.requests("POST https://api.resend.com/emails").map { request in
+            (try? JSONSerialization.jsonObject(with: request.body ?? Data())) as? [String: Any] ?? [:]
         }
     }
 }

@@ -42,3 +42,42 @@ public struct PushoverNotifier: Sendable {
         return true
     }
 }
+
+/// Sends email to the user through Resend.
+public struct ResendMailer: Sendable {
+    let http: HTTPClient
+    let apiKey: String?
+    let recipient: String?
+    let sender: String
+
+    public init(http: HTTPClient, apiKey: String?, recipient: String?, sender: String = "Radio <radio@jubishop.com>") {
+        self.http = http
+        self.apiKey = apiKey
+        self.recipient = recipient
+        self.sender = sender
+    }
+
+    /// Reads `RESEND_API_KEY` and `EMAIL_TO` from an env file.
+    public init(http: HTTPClient, envFile: URL) {
+        let values = readEnvFile(at: envFile)
+        self.init(http: http, apiKey: values["RESEND_API_KEY"], recipient: values["EMAIL_TO"])
+    }
+
+    var isConfigured: Bool { apiKey?.isEmpty == false && recipient?.isEmpty == false }
+
+    /// Returns false, without sending, when the Resend key or recipient is
+    /// missing.
+    @discardableResult
+    func send(subject: String, text: String, html: String) async throws -> Bool {
+        guard let apiKey, let recipient, isConfigured else { return false }
+        let body: [String: Any] = ["from": sender, "to": [recipient], "subject": subject, "text": text, "html": html]
+        let url = URL(string: "https://api.resend.com/emails")!
+        let response = try await http.send(HTTPRequest(
+            method: "POST", url: url,
+            headers: ["Authorization": "Bearer \(apiKey)", "Content-Type": "application/json"],
+            body: try JSONSerialization.data(withJSONObject: body)
+        ))
+        _ = try response.requireSuccess(for: url)
+        return true
+    }
+}

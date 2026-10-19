@@ -92,6 +92,7 @@ public actor Radio {
     let http: HTTPClient
     let sources: [String: PlaySource]
     let notifier: PushoverNotifier
+    let mailer: ResendMailer?
     let musicApp: MusicApp?
     let jev: Jev?
     let now: @Sendable () -> Date
@@ -122,6 +123,7 @@ public actor Radio {
         http: HTTPClient,
         sources: [PlaySource],
         notifier: PushoverNotifier,
+        mailer: ResendMailer? = nil,
         musicApp: MusicApp? = nil,
         jevAPIKey: String? = nil,
         playlistLimit: Int = 100,
@@ -137,6 +139,7 @@ public actor Radio {
         self.http = http
         self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.name, $0) })
         self.notifier = notifier
+        self.mailer = mailer
         self.musicApp = musicApp
         self.jev = jevAPIKey.flatMap { $0.isEmpty ? nil : Jev(http: http, apiKey: $0) }
         self.playlistLimit = playlistLimit
@@ -354,7 +357,7 @@ public actor Radio {
         let sync = try await sync()
         try await sendFeedAlerts()
         try await sendAuthAlert()
-        try await sendReviewNudge()
+        try await sendReviewReminder()
         return (polls, sync)
     }
 
@@ -387,23 +390,38 @@ public actor Radio {
         if sent { try store.setMetaDate("auth.alert_sent_at", now()) }
     }
 
-    private func sendReviewNudge() async throws {
+    /// Once a week, while songs wait for review, sends a push and an email
+    /// that lists them. Each counts as sent once its service accepts it, so a
+    /// failed email is retried without repeating the push; a service without
+    /// keys is skipped.
+    private func sendReviewReminder() async throws {
         guard let lastCheck = try store.metaDate("nudge.last_check_at") else {
             try store.setMetaDate("nudge.last_check_at", now())
             return
         }
         guard now().timeIntervalSince(lastCheck) >= Self.nudgeInterval else { return }
-        let count = try store.heldCount(since: lastCheck)
-        if count > 0 {
-            let songs = count == 1 ? "1 new song needs" : "\(count) new songs need"
-            let sent = try await notifier.send(
-                title: "Radio: songs to review",
-                message: "\(songs) review before \(count == 1 ? "it" : "they") can join the playlists.",
-                link: "\(dashboardURL)/review"
-            )
-            guard sent else { return }
+        let songs = try store.heldSongs()
+        if !songs.isEmpty {
+            let one = songs.count == 1
+            let summary = "\(one ? "1 song needs" : "\(songs.count) songs need") review before \(one ? "it" : "they") can join the playlists."
+            let reviewURL = "\(dashboardURL)/review"
+            if try !sentSince(lastCheck, "nudge.push_sent_at"),
+               try await notifier.send(title: "Radio: songs to review", message: summary, link: reviewURL) {
+                try store.setMetaDate("nudge.push_sent_at", now())
+            }
+            if let mailer, try !sentSince(lastCheck, "nudge.email_sent_at") {
+                let email = Pages.reviewEmail(songs, summary: summary, reviewURL: reviewURL)
+                if try await mailer.send(subject: "Radio: \(one ? "1 song" : "\(songs.count) songs") to review",
+                                         text: email.text, html: email.html) {
+                    try store.setMetaDate("nudge.email_sent_at", now())
+                }
+            }
         }
         try store.setMetaDate("nudge.last_check_at", now())
+    }
+
+    private func sentSince(_ date: Date, _ key: String) throws -> Bool {
+        try store.metaDate(key).map { $0 > date } ?? false
     }
 
     // MARK: Review
@@ -483,7 +501,7 @@ public actor Radio {
             lastSyncError: try store.meta("sync.last_error"),
             musicAppError: try store.meta("music.last_error"),
             jevError: try store.meta("jev.last_error"),
-            heldCount: try store.heldCount(since: nil)
+            heldCount: try store.heldCount()
         )
     }
 

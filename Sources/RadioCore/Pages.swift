@@ -1,7 +1,7 @@
 import Foundation
 
-/// Server-rendered HTML for the dashboard. Every dynamic value goes
-/// through `escape`.
+/// Server-rendered HTML for the dashboard and the review email. Every
+/// dynamic value goes through `escape`.
 enum Pages {
     static func dashboard(_ status: RadioStatus, signInURL: String) -> String {
         var body = """
@@ -170,6 +170,40 @@ enum Pages {
             body += "<section><ol class=\"reviewed\">" + reviewed.map(reviewedSong).joined() + "</ol></section>"
         }
         return page(title: "Review · Radio", body: body, refresh: false)
+    }
+
+    /// The weekly reminder's email, as plain text and HTML: every song
+    /// waiting for review, with Jev's suggestion, and a link to the review
+    /// page, which opens only on the home network.
+    static func reviewEmail(_ songs: [HeldSong], summary: String, reviewURL: String) -> (text: String, html: String) {
+        let them = songs.count == 1 ? "it" : "them"
+        var text = "\(summary)\n\nReview \(them) at \(reviewURL) from the home network.\n"
+        var items = ""
+        for song in songs {
+            let plays = "\(song.playCount) play\(song.playCount == 1 ? "" : "s")"
+            let details = "\(plays) on \(song.stations.joined(separator: ", ")) · last \(displayTime(song.lastPlayedAt))"
+            text += "\n• \(song.artist) – \(song.title)\n  \(details)\n"
+            items += "<li style=\"margin:0 0 12px\"><strong>\(escape(song.artist)) – \(escape(song.title))</strong>"
+                + "<br><span style=\"color:#656d76\">\(escape(details))</span>"
+            if let suggestion = song.suggestion {
+                let pick = song.candidates[suggestion.candidate]
+                text += "  Jev suggests \(pick.artistName) – \(pick.name), from \(pick.albumName)\n"
+                items += "<br>Jev suggests \(link(pick.url, "\(pick.artistName) – \(pick.name)")), from \(escape(pick.albumName))"
+            }
+            items += "</li>"
+        }
+        let html = """
+            <!doctype html>
+            <html lang="en">
+            <body style="margin:0;padding:16px;font:15px/1.45 -apple-system,system-ui,sans-serif">
+            <p>\(escape(summary))</p>
+            <p><a href="\(escape(reviewURL))" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#4f46e5;color:#fff;text-decoration:none">Review \(them)</a>
+              <span style="color:#656d76">from the home network</span></p>
+            <ul style="padding-left:20px">\(items)</ul>
+            </body>
+            </html>
+            """
+        return (text, html)
     }
 
     /// A held song with its first three candidates and Jev's pick; the rest

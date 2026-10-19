@@ -715,11 +715,8 @@ final class Store {
         try !db.query("SELECT 1 FROM songs WHERE catalog_id = ? AND status = 'matched'", [.text(catalogID)]).isEmpty
     }
 
-    func heldCount(since date: Date?) throws -> Int {
-        let rows = try db.query(
-            "SELECT COUNT(*) AS n FROM songs WHERE status = 'unmatched' AND held_at > ?",
-            [.text(date.map(iso) ?? "")]
-        )
+    func heldCount() throws -> Int {
+        let rows = try db.query("SELECT COUNT(*) AS n FROM songs WHERE status = 'unmatched'")
         return Int(rows.first!.int("n")!)
     }
 
