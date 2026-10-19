@@ -78,7 +78,9 @@ shows "sign-in expired". Repeat step 4.
 - **Dashboard:** <http://jubi.local:8102> from any device on the home network.
   It shows recent plays, songs just added, feed and sync health, and the
   review queue. It refreshes every minute. Radio serves plain HTTP, so an
-  `https://` address fails at once; use `http://`.
+  `https://` address fails at once; use `http://`. Away from home, a device
+  on the Mac's tailnet can open it at the Mac's full Tailscale name, such as
+  `http://mac-mini.tail1234.ts.net:8102`, or its Tailscale IP address.
 - **Review:** <http://jubi.local:8102/review> lists songs needing review
   first, with Jev's suggestion when it has one, then every song Jev or you
   matched or you ignored, newest first, each with an undo. In Terminal, use

@@ -200,13 +200,21 @@ import Testing
             await dashboard.handle(request("GET", path, headers: ["host": host], loopback: true)).status
         }
 
-        for host in ["jubi.local:8102", "Jubi.Local", "localhost:8102", "127.0.0.1:8102", "192.168.1.20:8102", "[::1]:8102"] {
+        // Tailscale assigns and resolves `.ts.net` names, so no other site
+        // can claim one for this Mac either.
+        for host in [
+            "jubi.local:8102", "Jubi.Local", "localhost:8102", "127.0.0.1:8102", "192.168.1.20:8102", "[::1]:8102",
+            "mac-mini.tail1234.ts.net:8102", "Mac-Mini.Tail1234.TS.NET",
+        ] {
             #expect(await status("/", host: host) == 200, "\(host)")
         }
         #expect(await status("/auth", host: "localhost:8102") == 200)
         // A site can point its own domain at this Mac (DNS rebinding), making
         // the dashboard and the sign-in page's developer token its own.
-        for host in ["rebind.attacker.example:8102", "jubi.local.attacker.example", "localhost.attacker.example"] {
+        for host in [
+            "rebind.attacker.example:8102", "jubi.local.attacker.example", "localhost.attacker.example",
+            "mac-mini.tail1234.ts.net.attacker.example", "attacker-ts.net",
+        ] {
             #expect(await status("/", host: host) == 403, "\(host)")
             #expect(await status("/auth", host: host) == 403, "\(host)")
         }
@@ -292,6 +300,21 @@ import Testing
         let start = ContinuousClock.now
         await #expect(throws: (any Error).self) { try await URLSession.shared.data(for: request) }
         #expect(ContinuousClock.now - start < .seconds(2))
+    }
+
+    // A listener that also takes IPv6 never sees IPv4 connections that
+    // arrive over Tailscale, so the server listens on IPv4 alone.
+    @Test func theServerListensOnIPv4Only() async throws {
+        let harness = try Harness()
+        let dashboard = Dashboard(radio: harness.radio)
+        let server = try WebServer(port: 0) { await dashboard.handle($0) }
+        let port = try await server.start()
+        defer { server.stop() }
+
+        let (_, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/")!)
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        let request = URLRequest(url: URL(string: "http://[::1]:\(port)/")!, timeoutInterval: 5)
+        await #expect(throws: (any Error).self) { try await URLSession.shared.data(for: request) }
     }
 
     @Test func theServerTreatsLocalConnectionsAsThisMac() async throws {

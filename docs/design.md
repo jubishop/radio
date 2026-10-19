@@ -451,10 +451,27 @@ The same day, the user asked to close DNS rebinding as well, where a site
 points its own domain at the Mac so a browser treats the dashboard as that
 site's own. Radio now serves only requests whose `Host` is a `.local` name,
 `localhost`, or an IP address, which no outside site can claim. Any other
-name gets a 403, so reaching the dashboard by another name, such as a VPN's
-DNS name, would need a code change.
+name gets a 403. [Tailscale names](#open-the-dashboard-over-tailscale) were
+added later.
 
 The macOS application firewall was off on 2026-10-13, and port 8102 was free.
+
+### Open the dashboard over Tailscale
+
+Accepted 2026-10-19. The user asked to open the dashboard from their phone
+away from home, over Tailscale. Radio now also serves requests whose `Host`
+ends in `.ts.net`. Only Tailscale assigns and resolves those names, so no
+outside site can claim one for this Mac. A short MagicDNS name, such as
+`http://mac-mini:8102`, still gets a 403, so use the full `.ts.net` name or
+the Mac's Tailscale IP address. Chromium's HSTS preload list didn't include
+`ts.net` on 2026-10-19, so browsers don't force those names to HTTPS.
+
+The server also listens on IPv4 alone. On 2026-10-19, under macOS 27, a
+Network framework listener that took both IPv4 and IPv6 never answered IPv4
+connections that arrived over Tailscale, while an IPv4-only listener and a
+plain BSD socket did. A client that tries IPv6 first, such as a browser
+opening `localhost` or `jubi.local`, is refused at once and falls back to
+IPv4.
 
 ### Make the page a home-network activity dashboard
 

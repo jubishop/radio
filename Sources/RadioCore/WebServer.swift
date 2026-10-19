@@ -34,9 +34,10 @@ public struct WebRequest: Sendable {
     }
 
     /// True when `Host` names this Mac as only it can be named: a `.local`
-    /// name, localhost, or an IP address. A browser sends the domain it
-    /// looked up, so a site that points its own domain at this Mac (DNS
-    /// rebinding) is refused. Clients that send no `Host` aren't browsers.
+    /// name, a Tailscale `.ts.net` name, localhost, or an IP address. A
+    /// browser sends the domain it looked up, so a site that points its own
+    /// domain at this Mac (DNS rebinding) is refused. Clients that send no
+    /// `Host` aren't browsers.
     var isAddressedToThisMac: Bool {
         guard var name = headers["host"]?.lowercased() else { return true }
         if name.hasPrefix("[") {
@@ -44,7 +45,8 @@ public struct WebRequest: Sendable {
         } else if let colon = name.lastIndex(of: ":") {
             name = String(name[..<colon])
         }
-        return name == "localhost" || name.hasSuffix(".local") || IPv4Address(name) != nil || IPv6Address(name) != nil
+        return name == "localhost" || name.hasSuffix(".local") || name.hasSuffix(".ts.net")
+            || IPv4Address(name) != nil || IPv6Address(name) != nil
     }
 }
 
@@ -80,6 +82,9 @@ public final class WebServer: Sendable {
     public init(port: UInt16, handler: @escaping Handler) throws {
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
+        // A listener that also takes IPv6 never sees IPv4 connections that
+        // arrive over Tailscale. Clients that try IPv6 first fall back at once.
+        (parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v4
         listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port) ?? .any)
         self.handler = handler
     }
