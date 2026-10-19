@@ -545,8 +545,10 @@ Later that day, they asked for both to come daily instead.
   waited. Before, a song held more than a week earlier never came up again.
   Each day starts a whole number of days after the first check, so the
   reminder keeps its time of day: a late run, or a day without runs, doesn't
-  make later reminders late. The days are counted in fixed 24-hour steps, so
-  the local time moves an hour when daylight saving time starts or ends.
+  make later reminders late. A reminder more than half a day late skips the
+  next one, so two don't come close together. The days are counted in fixed
+  24-hour steps, so the local time moves an hour when daylight saving time
+  starts or ends.
 - **What:** the push gives the count. The email, sent through Resend from
   `Radio <radio@jubishop.com>` to `EMAIL_TO`, lists each song with its plays,
   stations, latest play, and Jev's suggestion. Both link to

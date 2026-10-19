@@ -392,16 +392,17 @@ public actor Radio {
 
     /// Once a day, while songs wait for review, sends a push and an email
     /// that lists them. Each day starts a whole number of days after the
-    /// first check, so a late run doesn't make the next reminder late. Each
-    /// counts as sent once its service accepts it, so a failed email is
-    /// retried without repeating the push; a service without keys is skipped.
+    /// first check, so a late run doesn't make the next reminder late, and a
+    /// reminder more than half a day late skips the next one. Each counts as
+    /// sent once its service accepts it, so a failed email is retried without
+    /// repeating the push; a service without keys is skipped.
     private func sendReviewReminder() async throws {
         guard let lastCheck = try store.metaDate("nudge.last_check_at") else {
             try store.setMetaDate("nudge.last_check_at", now())
             return
         }
-        let days = (now().timeIntervalSince(lastCheck) / Self.nudgeInterval).rounded(.down)
-        guard days >= 1 else { return }
+        let elapsed = now().timeIntervalSince(lastCheck)
+        guard elapsed >= Self.nudgeInterval else { return }
         let due = lastCheck + Self.nudgeInterval
         let songs = try store.heldSongs()
         if !songs.isEmpty {
@@ -420,6 +421,7 @@ public actor Radio {
                 }
             }
         }
+        let days = (elapsed / Self.nudgeInterval).rounded()
         try store.setMetaDate("nudge.last_check_at", lastCheck + days * Self.nudgeInterval)
     }
 

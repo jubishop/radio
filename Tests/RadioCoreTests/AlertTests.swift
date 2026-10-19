@@ -135,14 +135,34 @@ import Testing
         _ = try await harness.radio.run()
         #expect(harness.pushes.count == 2)
 
-        harness.clock.advance(days: 2.5)
+        harness.clock.advance(days: 2.25)
         _ = try await harness.radio.run()
         harness.clock.advance(hours: 0.25)
         _ = try await harness.radio.run()
         #expect(harness.pushes.count == 3)
-        harness.clock.advance(hours: 11.75)
+        harness.clock.advance(hours: 17.75)
         _ = try await harness.radio.run()
         #expect(harness.pushes.count == 4)
+    }
+
+    /// A reminder more than half a day late skips the next day's, so two
+    /// don't come close together.
+    @Test func aVeryLateReminderSkipsTheNextOne() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.play("Unknown Band", "First")
+        _ = try await harness.radio.run()
+
+        harness.clock.advance(days: 1.75)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.count == 1)
+        harness.clock.advance(hours: 6)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.count == 1)
+        harness.clock.advance(days: 1)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.count == 2)
     }
 
     @Test func theReviewEmailListsEachSongAndLinksToTheReviewPage() async throws {
