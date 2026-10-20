@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 public enum MusicAppAction: Equatable, Sendable {
     /// Puts the song at the end of the playlist: removes any entries it has
@@ -88,9 +89,12 @@ public protocol MusicApp: Sendable {
 /// arguments, never as script source.
 public struct ScriptedMusicApp: MusicApp {
     let timeout: TimeInterval
+    let osascript: String
 
-    public init(timeout: TimeInterval = 120) {
+    /// Tests pass a stand-in for `osascript`.
+    public init(timeout: TimeInterval = 120, osascript: String = "/usr/bin/osascript") {
         self.timeout = timeout
+        self.osascript = osascript
     }
 
     public func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult {
@@ -132,17 +136,24 @@ public struct ScriptedMusicApp: MusicApp {
 
     private func runOSAScript(_ script: String, arguments: [String]) async throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.executableURL = URL(fileURLWithPath: osascript)
         process.arguments = ["-e", script] + arguments
         let output = Pipe()
         let errors = Pipe()
         process.standardOutput = output
         process.standardError = errors
         let timeout = self.timeout
+        // Both pipes are read as osascript writes them. When they were read
+        // only after it exited, a reply longer than a pipe holds, such as
+        // every track's plays and skips, stalled it until the timeout.
+        let replies = Mutex((output: Data(), errors: Data()))
+        let reading = DispatchGroup()
         return try await withCheckedThrowingContinuation { continuation in
             process.terminationHandler = { process in
-                let stdout = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                let stderr = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                reading.wait()
+                let (stdout, stderr) = replies.withLock {
+                    (String(decoding: $0.output, as: UTF8.self), String(decoding: $0.errors, as: UTF8.self))
+                }
                 if process.terminationReason == .uncaughtSignal {
                     continuation.resume(throwing: RadioError("Music didn't respond within \(Int(timeout)) seconds"))
                 } else if process.terminationStatus != 0 {
@@ -151,11 +162,23 @@ public struct ScriptedMusicApp: MusicApp {
                     continuation.resume(returning: stdout.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
             }
+            reading.enter()
+            reading.enter()
             do {
                 try process.run()
             } catch {
                 continuation.resume(throwing: error)
                 return
+            }
+            DispatchQueue.global().async {
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                replies.withLock { $0.output = data }
+                reading.leave()
+            }
+            DispatchQueue.global().async {
+                let data = errors.fileHandleForReading.readDataToEndOfFile()
+                replies.withLock { $0.errors = data }
+                reading.leave()
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
                 if process.isRunning { process.terminate() }

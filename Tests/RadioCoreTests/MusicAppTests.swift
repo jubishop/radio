@@ -135,6 +135,27 @@ import Testing
         #expect(harness.music.playlists()["Radio"] == ["B", "C", "D"])
     }
 
+    /// Every library track's plays and skips came to about 160 KB, more
+    /// than a pipe holds, and osascript stalled until the timeout on
+    /// 2026-10-20.
+    @Test func aReplyLongerThanAPipeHoldsIsReadInFull() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("osascript-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let osascript = directory.appendingPathComponent("osascript")
+        try """
+            #!/bin/sh
+            i=0
+            while [ $i -lt 5000 ]; do printf 'Song %d\\037Band\\0373\\0371\\036' $i; i=$((i + 1)); done
+            """.write(to: osascript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: osascript.path)
+
+        let listens = try await ScriptedMusicApp(timeout: 10, osascript: osascript.path).listens()
+
+        #expect(listens.count == 5000)
+        #expect(listens.last == TrackListens(name: "Song 4999", artist: "Band", plays: 3, skips: 1))
+    }
+
     @Test func musicsPlaysAndSkipsAreReadFromTheScriptsOutput() {
         let record = String(UnicodeScalar(30)), field = String(UnicodeScalar(31))
         let output = ["Babydoll", "Dominic Fike", "12", "3"].joined(separator: field) + record
