@@ -133,6 +133,8 @@ import Testing
         executeSQL([
             "UPDATE songs SET candidates = '\(oldLake)', jev_score = 0.37 WHERE title = 'Lake Of Fire'",
             "UPDATE songs SET candidates = '\(oldLive)' WHERE title = 'Come As You Are'",
+            // Schema 10's tables came later.
+            "DROP TABLE listens", "DROP TABLE radio_choices",
             "PRAGMA user_version = 8",
         ], in: harness.home)
         harness.jev.score("Lake of Fire (Live Acoustic)", 0.79)

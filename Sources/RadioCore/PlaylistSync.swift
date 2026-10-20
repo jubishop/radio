@@ -7,9 +7,10 @@ struct MusicAppSession {
     var succeeded = false
 }
 
-/// Keeps Radio's playlists to the most recently played songs, in order of
-/// each song's latest play on any station: a few in "Radio" and many more in
-/// "Radio Archive". Music.app makes every change to the playlists: it adds
+/// Keeps Radio's playlists in order of each song's latest play on any
+/// station: in "Radio", a few songs chosen by the user's plays and skips
+/// (see Listens.swift), and in "Radio Archive", many more of the most
+/// recently played. Music.app makes every change to the playlists: it adds
 /// and moves songs by placing them at the end, and drops songs that fall past
 /// a playlist's limit. The web API only adds songs to the library, so
 /// Music.app can find them.
@@ -101,10 +102,13 @@ extension Radio {
     }
 
     /// Syncs "Radio" before the archive, so trouble in the much larger
-    /// archive can't hold it up. Without Music.app, nothing changes. Returns
-    /// the changes by playlist name.
+    /// archive can't hold it up. "Radio" holds the songs Radio chose by the
+    /// user's plays and skips (see Listens.swift). Without Music.app,
+    /// nothing changes. Returns the changes by playlist name.
     func syncPlaylists(client: AppleMusicClient, music: inout MusicAppSession) async throws -> [String: PlaylistChanges] {
         guard musicApp != nil else { return [:] }
+        try await readListens(music: &music)
+        try chooseRadioSongs()
         var changes: [String: PlaylistChanges] = [:]
         for kind in Playlist.Kind.allCases {
             changes[name(of: kind)] = try await syncPlaylist(kind, client: client, music: &music)
@@ -240,10 +244,12 @@ extension Radio {
                          music: inout MusicAppSession) async throws -> MusicAppResult? {
         guard let musicApp, music.failure == nil else { return nil }
         let limit = limit(of: playlist.kind).formatted()
-        let target = MusicAppPlaylist(
-            id: playlist.musicID, name: name(of: playlist.kind),
-            description: "The \(limit) songs played most recently on the stations Radio follows, most recent last."
-        )
+        let description = switch playlist.kind {
+        case .recent: "\(limit) songs played recently on the stations Radio follows, most recent last. "
+            + "Each new song pushes out the one you've played and skipped most."
+        case .archive: "The \(limit) songs played most recently on the stations Radio follows, most recent last."
+        }
+        let target = MusicAppPlaylist(id: playlist.musicID, name: name(of: playlist.kind), description: description)
         let result: MusicAppResult
         do {
             result = try await musicApp.perform(action, playlist: target, song: song)

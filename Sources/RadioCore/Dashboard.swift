@@ -27,7 +27,7 @@ public struct Dashboard: Sendable {
                 guard let kind = Playlist.Kind.allCases.first(where: { Pages.path(of: $0) == request.path }) else {
                     return .html(Pages.notFound(), status: 404)
                 }
-                return .html(Pages.playlist(name: await radio.name(of: kind), entries: try await radio.playlistEntries(kind)))
+                return .html(Pages.playlist(kind, name: await radio.name(of: kind), entries: try await radio.playlistEntries(kind)))
             case ("GET", 1) where parts[0] == "charts":
                 return .html(Pages.charts(try await radio.charts()))
             case ("GET", 1) where parts[0] == "stats":

@@ -120,6 +120,7 @@ import Testing
             "ALTER TABLE songs DROP COLUMN jev_checked_at", "ALTER TABLE songs DROP COLUMN jev_model",
             "ALTER TABLE songs DROP COLUMN jev_score", "ALTER TABLE songs DROP COLUMN jev_pick",
             "ALTER TABLE songs DROP COLUMN undone_at", "DROP TABLE playlist_removals",
+            "DROP TABLE listens", "DROP TABLE radio_choices",
             "PRAGMA user_version = 6",
         ], in: harness.home)
         let clock = harness.clock

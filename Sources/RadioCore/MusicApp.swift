@@ -41,6 +41,22 @@ public struct MusicAppSong: Sendable {
     }
 }
 
+/// How often the user played and skipped a library track in Music, as its
+/// Plays and Skips columns count them.
+public struct TrackListens: Equatable, Sendable {
+    public var name: String
+    public var artist: String
+    public var plays: Int
+    public var skips: Int
+
+    public init(name: String, artist: String, plays: Int, skips: Int) {
+        self.name = name
+        self.artist = artist
+        self.plays = plays
+        self.skips = skips
+    }
+}
+
 /// What Music.app did. Playlist IDs are Music.app's persistent IDs.
 public enum MusicAppResult: Equatable, Sendable {
     case placed(playlistID: String)
@@ -64,6 +80,8 @@ public enum MusicAppResult: Equatable, Sendable {
 /// docs/design.md.
 public protocol MusicApp: Sendable {
     func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult
+    /// Every library track's plays and skips.
+    func listens() async throws -> [TrackListens]
 }
 
 /// Runs AppleScript in Music.app through `osascript`. Values travel as
@@ -81,7 +99,7 @@ public struct ScriptedMusicApp: MusicApp {
         case .remove: ("remove", "", "")
         case .comment(let text, let mark): ("comment", text, mark)
         }
-        let output = try await runOSAScript(arguments: [
+        let output = try await runOSAScript(Self.script, arguments: [
             name, playlist.id ?? "", playlist.name, playlist.description, song.name, song.artist, song.album, comment, mark,
         ])
         let parts = output.split(separator: " ", maxSplits: 1).map(String.init)
@@ -98,10 +116,24 @@ public struct ScriptedMusicApp: MusicApp {
         }
     }
 
-    private func runOSAScript(arguments: [String]) async throws -> String {
+    public func listens() async throws -> [TrackListens] {
+        Self.listens(fromOutput: try await runOSAScript(Self.listensScript, arguments: []))
+    }
+
+    /// Reads the listens script's output: tracks separated by character 30
+    /// and fields by character 31, which no title or artist contains.
+    public static func listens(fromOutput output: String) -> [TrackListens] {
+        output.split(separator: "\u{1E}").compactMap { record in
+            let fields = record.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count == 4, let plays = Int(fields[2]), let skips = Int(fields[3]) else { return nil }
+            return TrackListens(name: fields[0], artist: fields[1], plays: plays, skips: skips)
+        }
+    }
+
+    private func runOSAScript(_ script: String, arguments: [String]) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", Self.script] + arguments
+        process.arguments = ["-e", script] + arguments
         let output = Pipe()
         let errors = Pipe()
         process.standardOutput = output
@@ -198,6 +230,30 @@ public struct ScriptedMusicApp: MusicApp {
                 end try
                 return "placed " & targetID
             end tell
+        end run
+        """
+
+    /// Asks for each property of every library track at once, about a
+    /// second for 4,278 tracks on 2026-10-20, then joins them track by
+    /// track.
+    static let listensScript = """
+        on run
+            tell application "Music"
+                set trackNames to name of every track of library playlist 1
+                set trackArtists to artist of every track of library playlist 1
+                set trackPlays to played count of every track of library playlist 1
+                set trackSkips to skipped count of every track of library playlist 1
+            end tell
+            if (count of trackArtists) is not (count of trackNames) or (count of trackPlays) is not (count of trackNames) ¬
+                or (count of trackSkips) is not (count of trackNames) then error "The library changed while Radio read it."
+            set fieldMark to character id 31
+            set trackLines to {}
+            repeat with i from 1 to count of trackNames
+                set end of trackLines to (item i of trackNames) & fieldMark & (item i of trackArtists) & fieldMark ¬
+                    & ((item i of trackPlays) as text) & fieldMark & ((item i of trackSkips) as text)
+            end repeat
+            set AppleScript's text item delimiters to character id 30
+            return trackLines as text
         end run
         """
 }

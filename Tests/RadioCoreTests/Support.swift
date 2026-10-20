@@ -236,6 +236,8 @@ final class FakeAppleMusic: Sendable {
         var playlistsCreated = 0
         /// Music.app's comments, by catalog song.
         var comments: [String: String] = [:]
+        /// The user's plays and skips in Music.app, by catalog song.
+        var listens: [String: (plays: Int, skips: Int)] = [:]
     }
     private let catalog = Mutex<[CatalogSong]>([])
     private let state = Mutex(State())
@@ -387,6 +389,29 @@ final class FakeAppleMusic: Sendable {
         return state.withLock { state in ids.compactMap { state.comments[$0] }.first }
     }
 
+    /// Puts a song in the library, as if the user added it before Radio did.
+    func addToLibrary(_ title: String) {
+        let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
+        change { $0.apple.songIDs.formUnion(ids) }
+    }
+
+    /// Sets how often the user played and skipped a song in Music.
+    func setListens(_ title: String, plays: Int = 0, skips: Int = 0) {
+        let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
+        state.withLock { state in for id in ids { state.listens[id] = (plays, skips) } }
+    }
+
+    /// Music.app's plays and skips of every library track.
+    func musicAppListens() -> [TrackListens] {
+        let catalog = catalog.withLock { $0 }
+        return state.withLock { state in
+            catalog.filter { state.mac.songIDs.contains($0.id) }.map { song in
+                let listens = state.listens[song.id] ?? (0, 0)
+                return TrackListens(name: song.name, artist: song.artistName, plays: listens.plays, skips: listens.skips)
+            }
+        }
+    }
+
     /// Writes a song's comment the way a person would in Get Info.
     func writeCommentByHand(_ text: String, on title: String) {
         let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
@@ -481,6 +506,13 @@ final class FakeMusicApp: MusicApp {
             throw RadioError(failure)
         }
         return music.musicAppPerform(action, playlist: playlist, song: song)
+    }
+
+    /// Reading plays and skips fails along with edits, but isn't counted
+    /// in `calls`, which counts edits.
+    func listens() async throws -> [TrackListens] {
+        if let failure = state.withLock({ $0.failure }) { throw RadioError(failure) }
+        return music.musicAppListens()
     }
 }
 

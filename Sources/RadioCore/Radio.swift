@@ -512,9 +512,17 @@ public actor Radio {
         )
     }
 
-    /// A playlist's songs, most recently played first.
+    /// A playlist's songs, most recently played first, marking the one the
+    /// next new song will push out of "Radio".
     func playlistEntries(_ kind: Playlist.Kind) throws -> [PlaylistEntry] {
-        try store.playlistEntries(kind).reversed().sorted { ($0.latestPlay ?? .distantPast) > ($1.latestPlay ?? .distantPast) }
+        var entries = try store.playlistEntries(kind).reversed()
+            .sorted { ($0.latestPlay ?? .distantPast) > ($1.latestPlay ?? .distantPast) }
+        if kind == .recent, let next = try nextToDropFromRadio() {
+            for index in entries.indices where entries[index].catalogID == next {
+                entries[index].dropsNext = true
+            }
+        }
+        return entries
     }
 
     func charts() throws -> Charts {

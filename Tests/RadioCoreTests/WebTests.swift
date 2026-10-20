@@ -235,6 +235,36 @@ import Testing
         #expect(text(stats).contains(#"<p class="empty">No plays this week yet.</p>"#))
     }
 
+    /// The user asked on 2026-10-20 to see their plays and skips, and the
+    /// song the next new one will push out of "Radio".
+    @Test func thePlaylistPagesShowYourPlaysAndSkipsAndWhatDropsNext() async throws {
+        let harness = try Harness(playlistLimit: 2)
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        for title in ["A", "B"] { harness.music.addToCatalog("Band", title) }
+        harness.play("Band", "A", minutesAgo: 20)
+        harness.play("Band", "B", minutesAgo: 10)
+        _ = try await harness.radio.run()
+        harness.music.setListens("A", plays: 3, skips: 1)
+        harness.music.setListens("B", plays: 1)
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        let dashboard = Dashboard(radio: harness.radio)
+
+        let radio = text(await dashboard.handle(request("GET", "/playlists/radio")))
+        let archive = text(await dashboard.handle(request("GET", "/playlists/archive")))
+
+        let songs = radio.components(separatedBy: "<li>").dropFirst()
+        let a = try #require(songs.first { $0.contains("Band – A") })
+        let b = try #require(songs.first { $0.contains("Band – B") })
+        #expect(a.contains("3 plays · 1 skip"))
+        #expect(a.contains(#"<span class="badge drop">drops next</span>"#))
+        #expect(b.contains("1 play"))
+        #expect(!b.contains("drops next"))
+        #expect(archive.contains("3 plays · 1 skip"))
+        #expect(!archive.contains("drops next"))
+    }
+
     @Test func theReviewPageMatchesAndIgnoresSongs() async throws {
         let harness = try Harness()
         try await harness.signIn()

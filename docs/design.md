@@ -5,8 +5,9 @@ status: current
 # Radio design
 
 Radio logs each song its stations play, starting with Alt 102.1 (WRXL,
-Richmond). It keeps the 100 most recently played in an Apple Music playlist
-named "Radio", and the 10,000 most recently played in "Radio Archive". This
+Richmond). It keeps 100 recently played in an Apple Music playlist named
+"Radio", pushing out the ones the user played most, and the 10,000 most
+recently played in "Radio Archive". This
 page records the
 accepted decisions, the constraints they rest on, and the questions still
 open. Feed details are in
@@ -260,7 +261,55 @@ when a new one arrives, so that shuffling it plays songs the stations played
 recently. The oldest song is the one least recently played on any station,
 so a re-played song stays. Radio drops songs through Music.app, the same way
 it moves them, and a dropped song returns when a station plays it again.
-Dropped songs stay in the library.
+Dropped songs stay in the library. Since 2026-10-20,
+[the song the user played most](#push-the-song-you-played-most-out-of-radio)
+leaves first.
+
+### Push the song you played most out of "Radio"
+
+Accepted 2026-10-20. This changes which song leaves "Radio" in the decision
+above. The user asked Radio to read how often they had played each song in
+Music, and for a new song to push out the one they had played most, the
+oldest among ties. Asked about the details, the user chose:
+
+- **Only "Radio".** "Radio Archive" still drops the least recently played
+  song, so it stays a record of what the stations played.
+- **Lifetime plays and skips.** The count is Music's Plays plus Skips,
+  summed over every library track with the song's title and artist, such as
+  its clean and explicit copies. Apple doesn't document either column. In
+  community testing (checked 2026-10-20), a play counts when a song plays to
+  the end, and a skip when it's skipped about 2 to 20 seconds in. The user
+  chose to count skips as plays.
+- **Ties go to the least recently played** on any station, the old rule.
+  While no song in "Radio" has plays or skips, it works as before.
+- **Every song entering "Radio" competes.** A new song, one already in the
+  library, and a dropped song a station plays again all get in only if a
+  song in "Radio" has more plays and skips, and that song leaves. Otherwise
+  the song goes only to the archive. This keeps a song from bouncing in and
+  out on each sync.
+- **The playlist pages show it.** Both list each song's plays and skips, and
+  the "Radio" page marks the song that leaves next.
+
+Each sync reads every library track's plays and skips from Music.app in one
+script, about a second for the 4,278 tracks on 2026-10-20. Radio remembers
+the songs it chose for "Radio", and the latest play at which each other song
+left or stayed out. A song contends again only when a station plays it
+again, so playing the songs in "Radio" never brings a dropped one back.
+Songs contend in play order. The first sync after the upgrade chooses the
+songs "Radio" already holds, so nothing changes until a new song arrives. A
+rehearsal on a copy of the live database on 2026-10-20 chose the same 100
+songs, and "Espresso" (35 plays, 4 skips) would have left first.
+
+The tradeoffs:
+
+- Plays on other devices count once Music on the Mac mini has them through
+  Sync Library.
+- Titles match as placing does, so another song with the same title and
+  artist adds its plays.
+- A song the user played a lot may never return while every song in
+  "Radio" has fewer plays.
+- When Music.app can't be read, the sync skips Music.app, as for any
+  failure, and choices use the counts last read.
 
 ### Add a larger "Radio Archive" playlist
 
@@ -527,7 +576,8 @@ accepted both recommendations:
   the upgrade.
 - **Dashboard pages:** `/playlists/radio` and `/playlists/archive` list each
   playlist's songs, most recently played first, with each station's play
-  count. The dashboard's playlist counts link to them.
+  count and, since 2026-10-20, the user's plays and skips. The dashboard's
+  playlist counts link to them.
 
 The tradeoffs:
 
@@ -633,8 +683,9 @@ and "Radio Archive".
   "Radio Archive" with every matched song, in order of latest play. "Radio"
   keeps its entries.
 - **Dropping songs:** for each playlist, each sync first drops, through
-  Music.app, every entry outside its limit of most recently played songs, and
-  then places new and re-played songs. An entry to drop that Music.app can't
+  Music.app, every entry for a song it shouldn't hold, and then places new
+  and re-played songs. "Radio" holds the songs Radio chose for it, and the
+  archive its limit of most recently played songs. An entry to drop that Music.app can't
   find was removed by hand, and Radio forgets it.
 - **Station credit:** a song added to "Radio" is credited to the station
   whose play placed it, which is its latest play at that time. The

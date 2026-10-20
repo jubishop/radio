@@ -61,12 +61,16 @@ enum Pages {
     }
 
     /// A playlist's songs, most recently played first, with the stations
-    /// that played each one and how often.
-    static func playlist(name: String, entries: [PlaylistEntry]) -> String {
+    /// that played each one and how often, and the user's plays and skips.
+    /// "Radio" marks the song the next new one will push out.
+    static func playlist(_ kind: Playlist.Kind, name: String, entries: [PlaylistEntry]) -> String {
         let count = "\(entries.count) song\(entries.count == 1 ? "" : "s")"
+        let rule = kind == .recent
+            ? " A new song pushes out the one you've played and skipped most in Music, or among ties, the one played longest ago."
+            : ""
         var body = """
             <header><p><a href="/">← Radio</a></p><h1>\(escape(name))</h1>
-            <p class="meta">\(count), most recently played first. Each song's comment in Music gives its latest play and stations.</p></header>
+            <p class="meta">\(count), most recently played first.\(rule) Each song's comment in Music gives its latest play and each station's plays.</p></header>
             <section>
             """
         if entries.isEmpty {
@@ -76,11 +80,20 @@ enum Pages {
             for entry in entries {
                 let time = entry.latestPlay.map { "<time>\(escape(shortTime($0)))</time> " } ?? ""
                 let stations = entry.stations.map(tag).joined(separator: " ")
-                body += "<li>\(time)\(link(entry.url, "\(entry.artist) – \(entry.title)")) \(stations)</li>"
+                let drop = entry.dropsNext ? " <span class=\"badge drop\">drops next</span>" : ""
+                body += "<li>\(time)\(link(entry.url, "\(entry.artist) – \(entry.title)")) \(stations)\(listens(entry.listens))\(drop)</li>"
             }
             body += "</ol>"
         }
         return page(title: "\(name) · Radio", body: body + "</section>", refresh: false)
+    }
+
+    /// Such as "3 plays · 1 skip", leaving out a count of zero.
+    private static func listens(_ listens: Listens) -> String {
+        var parts: [String] = []
+        if listens.plays > 0 { parts.append("\(listens.plays) play\(listens.plays == 1 ? "" : "s")") }
+        if listens.skips > 0 { parts.append("\(listens.skips) skip\(listens.skips == 1 ? "" : "s")") }
+        return parts.isEmpty ? "" : " <span class=\"listens\">\(parts.joined(separator: " · "))</span>"
     }
 
     /// The last week's 100 most played songs, each with the station that
@@ -494,7 +507,8 @@ enum Pages {
         .s4 { --station: var(--s4); } .s5 { --station: var(--s5); } .s6 { --station: var(--s6); } .s7 { --station: var(--s7); }
         .tag { --c: var(--station); }
         .good { --c: var(--good); color: var(--c); } .bad { --c: var(--bad); color: var(--c); } .jev { --c: var(--jev); color: var(--c); }
-        .you, .chart { --c: var(--link); } .playlist { --c: var(--playlist); } .waiting { --c: var(--waiting); } .by { font-weight: 600; }
+        .you, .chart { --c: var(--link); } .playlist { --c: var(--playlist); } .waiting, .drop { --c: var(--waiting); } .by { font-weight: 600; }
+        .listens { color: var(--muted); font-size: 13px; white-space: nowrap; }
         .station { border-top: 4px solid var(--station);
           background: linear-gradient(color-mix(in srgb, var(--station) 8%, var(--card)), var(--card) 120px); }
         .station h2::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%;

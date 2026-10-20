@@ -82,6 +82,9 @@ struct PlaylistEntry {
     var song: MusicAppSong?
     /// The comment Radio last gave the song in Music.app.
     var comment: String?
+    var listens: Listens
+    /// True for the song the next new one will push out of a full "Radio".
+    var dropsNext = false
 
     var latestPlay: Date? { stations.first?.latestPlay }
 }
@@ -177,7 +180,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 9
+    private static let schemaVersion: Int64 = 10
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -194,6 +197,7 @@ final class Store {
             if version < 7 { try migrateToSchemaSeven() }
             if version < 8 { try migrateToSchemaEight() }
             if version < 9 { try migrateToSchemaNine() }
+            if version < 10 { try migrateToSchemaTen() }
         }
     }
 
@@ -398,6 +402,21 @@ final class Store {
             """
         )
         try db.execute("PRAGMA user_version = 9")
+    }
+
+    /// Schema 10 keeps the user's plays and skips of each song in Music, and
+    /// which songs Radio chose for "Radio", which depends on them since
+    /// 2026-10-20. Radio makes its first choices on the next sync.
+    private func migrateToSchemaTen() throws {
+        try db.execute("CREATE TABLE listens (catalog_id TEXT PRIMARY KEY, plays INTEGER NOT NULL, skips INTEGER NOT NULL)")
+        try db.execute("""
+            CREATE TABLE radio_choices (
+                catalog_id TEXT PRIMARY KEY,
+                chosen INTEGER NOT NULL,
+                played_at TEXT NOT NULL
+            )
+            """)
+        try db.execute("PRAGMA user_version = 10")
     }
 
     // MARK: Stations
@@ -757,27 +776,30 @@ final class Store {
         try db.execute("DELETE FROM playlist_tracks WHERE playlist = ?", [.text(kind.rawValue)])
     }
 
-    /// The matched songs played most recently on any station, up to the bound
-    /// limit. SQLite takes the bare columns
-    /// from the row that has the MAX, so each song's station is the one that
+    /// The matched songs a playlist holds, played most recently on any
+    /// station, up to the bound limit. "Radio" holds only the songs Radio
+    /// chose for it (see Listens.swift). SQLite takes the bare columns from
+    /// the row that has the MAX, so each song's station is the one that
     /// played it last.
-    private static let recentSongs = """
-        recent AS (
-            SELECT s.id AS song_id, s.catalog_id, p.station_id, MAX(p.played_at) AS latest_played
-            FROM plays p JOIN songs s ON s.id = p.song_id
-            WHERE s.status = 'matched'
-            GROUP BY s.catalog_id ORDER BY latest_played DESC, s.catalog_id DESC LIMIT ?
-        )
-        """
+    private static func recentSongs(_ kind: Playlist.Kind) -> String {
+        let chosen = kind == .recent ? " AND s.catalog_id IN (SELECT catalog_id FROM radio_choices WHERE chosen = 1)" : ""
+        return """
+            recent AS (
+                SELECT s.id AS song_id, s.catalog_id, p.station_id, MAX(p.played_at) AS latest_played
+                FROM plays p JOIN songs s ON s.id = p.song_id
+                WHERE s.status = 'matched'\(chosen)
+                GROUP BY s.catalog_id ORDER BY latest_played DESC, s.catalog_id DESC LIMIT ?
+            )
+            """
+    }
 
     /// Songs to place at the end of a playlist, in the order of their latest
-    /// plays: those among the `limit` most recently played that aren't in it
-    /// yet, and entries whose song has played again, on any station, since
-    /// the entry was placed.
+    /// plays: those it should hold that aren't in it yet, and entries whose
+    /// song has played again, on any station, since the entry was placed.
     func tracksToPlace(in kind: Playlist.Kind, limit: Int) throws -> [TrackToPlace] {
         try db.query(
             """
-            WITH \(Self.recentSongs),
+            WITH \(Self.recentSongs(kind)),
             placing AS (
                 SELECT r.song_id, r.catalog_id, r.station_id, r.latest_played, 0 AS in_playlist FROM recent r
                 WHERE NOT EXISTS (SELECT 1 FROM playlist_tracks t WHERE t.playlist = ? AND t.catalog_id = r.catalog_id)
@@ -805,12 +827,12 @@ final class Store {
         }
     }
 
-    /// A playlist's entries for songs outside the `limit` most recently
-    /// played, least recently placed first.
+    /// A playlist's entries for songs it shouldn't hold, least recently
+    /// placed first.
     func tracksToDrop(from kind: Playlist.Kind, limit: Int) throws -> [TrackToDrop] {
         try db.query(
             """
-            WITH \(Self.recentSongs)
+            WITH \(Self.recentSongs(kind))
             SELECT t.catalog_id, s.catalog_name, s.catalog_artist, s.catalog_album
             FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
             WHERE t.playlist = ? AND t.catalog_id NOT IN (SELECT catalog_id FROM recent)
@@ -893,9 +915,10 @@ final class Store {
         return try db.query(
             """
             SELECT t.catalog_id, s.artist, s.title, s.catalog_name, s.catalog_artist, s.catalog_album, s.catalog_url,
-                c.text AS comment
+                c.text AS comment, x.plays, x.skips
             FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
             LEFT JOIN music_comments c ON c.catalog_id = t.catalog_id
+            LEFT JOIN listens x ON x.catalog_id = t.catalog_id
             WHERE t.playlist = ? ORDER BY t.position_played_at, t.rowid
             """,
             [.text(kind.rawValue)]
@@ -904,7 +927,8 @@ final class Store {
             return PlaylistEntry(
                 catalogID: catalogID, artist: row.string("catalog_artist") ?? row.string("artist")!,
                 title: row.string("catalog_name") ?? row.string("title")!, url: row.string("catalog_url"),
-                stations: stations[catalogID] ?? [], song: Self.musicAppSong(row), comment: row.string("comment")
+                stations: stations[catalogID] ?? [], song: Self.musicAppSong(row), comment: row.string("comment"),
+                listens: Listens(plays: Int(row.int("plays") ?? 0), skips: Int(row.int("skips") ?? 0))
             )
         }
     }

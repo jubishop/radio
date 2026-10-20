@@ -47,10 +47,13 @@ six months.
 The next scheduled run matches songs and creates two playlists, which every
 station feeds. Run `radio sync` to do it immediately.
 
-- **Radio** holds the 100 songs played most recently on any station, so
-  shuffling it plays what the stations played lately. When a new song joins,
-  the least recently played one leaves the playlist but stays in your
-  library.
+- **Radio** holds 100 songs the stations played recently, so shuffling it
+  plays what they played lately. When a new song joins, the song you've
+  played and skipped most in Music leaves, or among ties, the one the
+  stations played longest ago. A song you've played more than every song in
+  "Radio" stays out of it. Songs that leave stay in your library and the
+  archive. The dashboard's "Radio" page shows your plays and skips and marks
+  the song that leaves next.
 - **Radio Archive** holds the 10,000 songs played most recently, and drops
   the oldest the same way.
 

@@ -54,6 +54,98 @@ import Testing
         #expect(try await harness.radio.status().playlistCount == 3)
     }
 
+    /// The user asked on 2026-10-20 for a new song to push the song they've
+    /// played and skipped most out of "Radio". The archive still drops the
+    /// least recently played.
+    @Test func aNewSongPushesOutTheSongYouPlayedAndSkippedMost() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
+        harness.music.setListens("A", plays: 2)
+        harness.music.setListens("B", plays: 1, skips: 2)
+        harness.music.addToCatalog("Band", "D")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        let (_, sync) = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["A", "C", "D"], "Radio Archive": ["A", "B", "C", "D"]])
+        #expect(sync.playlists["Radio"]?.dropped == 1)
+    }
+
+    @Test func amongSongsYouPlayedEquallyTheLeastRecentlyPlayedOneDrops() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
+        harness.music.setListens("A", plays: 1)
+        harness.music.setListens("C", skips: 1)
+        harness.music.addToCatalog("Band", "D")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["B", "C", "D"])
+    }
+
+    /// A song stays out of a full "Radio" when you've played it more than
+    /// every song there, so it can't bounce in and out on each sync. It
+    /// gets in once a song in "Radio" passes it.
+    @Test func aReplayedSongYouPlayedMostStaysOutOfRadio() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 3)
+        harness.music.setListens("A", plays: 5)
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "A")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["B", "C", "D"], "Radio Archive": ["B", "C", "D", "A"]])
+
+        let calls = harness.musicApp.calls
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        #expect(harness.musicApp.calls == calls)
+
+        harness.music.setListens("C", plays: 6)
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "A")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["B", "D", "A"])
+    }
+
+    @Test func aSongAlreadyInYourLibraryThatYouPlayedMostStaysOutOfRadio() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
+        harness.music.addToCatalog("Band", "D")
+        harness.music.addToLibrary("D")
+        harness.music.setListens("D", plays: 40)
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists() == ["Radio": ["A", "B", "C"], "Radio Archive": ["A", "B", "C", "D"]])
+    }
+
+    /// Playing the songs in "Radio" doesn't bring back one it dropped; only
+    /// a station playing that song again does.
+    @Test func aDroppedSongReturnsOnlyWhenAStationPlaysItAgain() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 3)
+        for title in ["B", "C", "D"] { harness.music.setListens(title, plays: 3) }
+        harness.clock.advance(hours: 1)
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["B", "C", "D"])
+    }
+
+    /// Upgrading keeps "Radio" as it was; your plays decide only what later
+    /// songs push out.
+    @Test func upgradingLeavesRadioAsItWas() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 3)
+        executeSQL(["DELETE FROM radio_choices"], in: harness.home)
+        harness.music.setListens("B", plays: 9)
+        harness.clock.advance(hours: 1)
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio"] == ["B", "C", "D"])
+    }
+
+    @Test func musicsPlaysAndSkipsAreReadFromTheScriptsOutput() {
+        let record = String(UnicodeScalar(30)), field = String(UnicodeScalar(31))
+        let output = ["Babydoll", "Dominic Fike", "12", "3"].joined(separator: field) + record
+            + ["Tab\there", "Band", "0", "0"].joined(separator: field)
+        #expect(ScriptedMusicApp.listens(fromOutput: output) == [
+            TrackListens(name: "Babydoll", artist: "Dominic Fike", plays: 12, skips: 3),
+            TrackListens(name: "Tab\there", artist: "Band", plays: 0, skips: 0),
+        ])
+        #expect(ScriptedMusicApp.listens(fromOutput: "").isEmpty)
+    }
+
     /// Music.app uploads its whole copy of a playlist it changed, so a song
     /// added on Apple's side that Music.app hadn't downloaded yet was lost
     /// (2026-10-13: "Radio" held 35 of 100 songs).
