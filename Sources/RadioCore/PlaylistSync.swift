@@ -162,20 +162,22 @@ extension Radio {
     /// Starts every comment Radio writes, so it replaces only its own.
     static let commentMark = "📻"
 
-    /// Such as "📻 2026-10-13 15:14 · Alt 102.1, 107.7 The End": the song's
-    /// latest play in the Mac's time zone, which sorts the Comments column
-    /// in time order, then the stations that played it, most recently first.
+    /// Such as "📻 2026-10-13 15:14 · Alt 102.1 ×3, 107.7 The End": the
+    /// song's latest play in the Mac's time zone, which sorts the Comments
+    /// column in time order, then the stations that played it, most recently
+    /// first, each with how often it did when more than once.
     static func comment(for entry: PlaylistEntry) -> String? {
         guard let latest = entry.latestPlay else { return nil }
         let time = latest.formatted(Date.VerbatimFormatStyle(
             format: "\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
             timeZone: .current, calendar: Calendar(identifier: .gregorian)
         ))
-        return "\(commentMark) \(time) · " + entry.stations.map(\.name).joined(separator: ", ")
+        return "\(commentMark) \(time) · " + entry.stations.map { $0.plays > 1 ? "\($0.name) ×\($0.plays)" : $0.name }
+            .joined(separator: ", ")
     }
 
     /// Gives each song in the playlists a Music.app comment with its latest
-    /// play and stations, when its plays have changed it, since Music.app's
+    /// play and each station's plays, when its plays have changed it, since Music.app's
     /// playlists can't show Radio's details any other way. Returns how many
     /// songs Music.app was asked to comment.
     func syncComments(music: inout MusicAppSession) async throws -> Int {

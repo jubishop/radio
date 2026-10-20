@@ -92,7 +92,8 @@ shows "sign-in expired". Repeat step 4.
 - **Playlists:** <http://jubi.local:8102/playlists/radio> and
   <http://jubi.local:8102/playlists/archive> list each playlist's songs with
   the stations that played them. In Music, each song's comment gives its
-  latest play and stations, such as `📻 2026-10-13 15:14 · Alt 102.1`.
+  latest play and how often each station played it, such as
+  `📻 2026-10-20 13:38 · Hits 106.1 ×12, MOViN 92.5 ×3`.
   Playlists can't show comments as a column, but the Songs view can: show its
   Comments column with View > Show View Options, and sort by it to list
   Radio's songs in play order.

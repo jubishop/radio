@@ -279,20 +279,23 @@ import Testing
         return formatter.string(from: date)
     }
 
-    @Test func eachSongsCommentGivesItsLatestPlayAndItsStations() async throws {
+    /// The user asked on 2026-10-20 for each station's play count, shown
+    /// only when it played the song more than once.
+    @Test func eachSongsCommentGivesItsLatestPlayAndHowOftenEachStationPlayedIt() async throws {
         let harness = try Harness()
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
         _ = try await harness.radio.addStation(slug: "rock")
         harness.music.addToCatalog("Band", "A")
         harness.music.addToCatalog("Band", "B")
+        harness.play("Band", "A", minutesAgo: 40)
         harness.play("Band", "A", minutesAgo: 30)
         harness.play("Band", "A", on: "101-2000", minutesAgo: 20)
         harness.play("Band", "B", minutesAgo: 10)
         _ = try await harness.radio.run()
 
         let now = harness.clock.now
-        #expect(harness.music.comment(of: "A") == "📻 \(minute(now - 20 * 60)) · Rock 99, Alt 102.1")
+        #expect(harness.music.comment(of: "A") == "📻 \(minute(now - 20 * 60)) · Rock 99, Alt 102.1 ×2")
         #expect(harness.music.comment(of: "B") == "📻 \(minute(now - 10 * 60)) · Alt 102.1")
     }
 

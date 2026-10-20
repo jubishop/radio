@@ -515,9 +515,10 @@ each song. Music's playlists [can't show comments](#constraints), so the user
 accepted both recommendations:
 
 - **Comments:** each sync gives every song in the playlists a comment such
-  as `📻 2026-10-13 15:14 · Alt 102.1, 107.7 The End`. It has the song's
+  as `📻 2026-10-13 15:14 · Alt 102.1 ×3, 107.7 The End`. It has the song's
   latest play on any station, in the Mac's time zone, then every station
-  that played it, most recently first. The time comes first, to the minute
+  that played it, most recently first, each with how often it played the
+  song when that's more than once. The time comes first, to the minute
   in 24-hour form, so sorting the Songs view by Comments puts Radio's songs
   in play order. Radio replaces only empty comments and its own, which start
   with 📻, so a comment someone writes stays. It remembers the comment it
@@ -534,6 +535,13 @@ The tradeoffs:
 - A song dropped from both playlists keeps its last comment.
 - Music.app finds the song's track the way placing does, so a comment can
   land on another version with the same title and artist.
+
+Changed 2026-10-20. The user asked for each station's play count in the
+comment, as the playlist pages show it, such as `Hits 106.1 ×12`. A station
+that played the song once shows no count. Every comment changes, so the first
+sync after the upgrade rewrites the comment of every song in the playlists,
+one Music.app call per song. After that, a play changes the latest time
+anyway, so the counts cost no extra calls.
 
 ### Send a daily review reminder by Pushover and email
 
