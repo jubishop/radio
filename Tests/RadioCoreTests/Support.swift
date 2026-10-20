@@ -379,6 +379,10 @@ final class FakeAppleMusic: Sendable {
         }
     }
 
+    func deletePlaylist(_ name: String) {
+        editByHand { library in library.playlists = library.playlists.filter { $0.value.name != name } }
+    }
+
     func deleteAllPlaylists() {
         editByHand { $0.playlists = [:] }
     }

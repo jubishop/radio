@@ -30,8 +30,10 @@ import Testing
         #expect(page.contains("Latest: <strong>Tom &amp; Jerry &lt;Band&gt; – Unmatched Song</strong>"))
         #expect(page.contains(#"<span class="pill good">Apple Music connected · US</span>"#))
         #expect(page.contains(#"<a class="pill bad" href="/review">1 song to review</a>"#))
-        #expect(page.contains("in playlist"))
+        #expect(page.contains(#"<span class="badge playlist">in Radio</span>"#))
+        #expect(page.contains("<h3>Just added to Radio</h3>"))
         #expect(page.contains(#"<a class="pill playlist" href="/playlists/radio">1 song in Radio</a>"#))
+        #expect(page.contains(#"<a class="pill playlist" href="/playlists/new">1 in Radio (New)</a>"#))
         #expect(page.contains(#"<a class="pill playlist" href="/playlists/archive">1 in Radio Archive</a>"#))
         #expect(page.contains(#"<a class="pill chart" href="/charts">Charts</a>"#))
         #expect(page.contains(#"<a class="pill chart" href="/stats">Stats</a>"#))
@@ -236,7 +238,7 @@ import Testing
     }
 
     /// The user asked on 2026-10-20 to see their plays and skips, and the
-    /// song the next new one will push out of "Radio".
+    /// song the next new one will push out of "Radio (New)".
     @Test func thePlaylistPagesShowYourPlaysAndSkipsAndWhatDropsNext() async throws {
         let harness = try Harness(playlistLimit: 2)
         try await harness.signIn()
@@ -252,17 +254,21 @@ import Testing
         let dashboard = Dashboard(radio: harness.radio)
 
         let radio = text(await dashboard.handle(request("GET", "/playlists/radio")))
+        let new = text(await dashboard.handle(request("GET", "/playlists/new")))
         let archive = text(await dashboard.handle(request("GET", "/playlists/archive")))
 
-        let songs = radio.components(separatedBy: "<li>").dropFirst()
+        #expect(new.contains("<h1>Radio (New)</h1>"))
+        let songs = new.components(separatedBy: "<li>").dropFirst()
         let a = try #require(songs.first { $0.contains("Band – A") })
         let b = try #require(songs.first { $0.contains("Band – B") })
         #expect(a.contains("3 plays · 1 skip"))
         #expect(a.contains(#"<span class="badge drop">drops next</span>"#))
         #expect(b.contains("1 play"))
         #expect(!b.contains("drops next"))
-        #expect(archive.contains("3 plays · 1 skip"))
-        #expect(!archive.contains("drops next"))
+        for page in [radio, archive] {
+            #expect(page.contains("3 plays · 1 skip"))
+            #expect(!page.contains("drops next"))
+        }
     }
 
     @Test func theReviewPageMatchesAndIgnoresSongs() async throws {

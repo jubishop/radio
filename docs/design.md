@@ -5,9 +5,9 @@ status: current
 # Radio design
 
 Radio logs each song its stations play, starting with Alt 102.1 (WRXL,
-Richmond). It keeps 100 recently played in an Apple Music playlist named
-"Radio", pushing out the ones the user played most, and the 10,000 most
-recently played in "Radio Archive". This
+Richmond). It keeps the 100 most recently played in an Apple Music playlist
+named "Radio", 100 recently played that the user hasn't played much in
+"Radio (New)", and the 10,000 most recently played in "Radio Archive". This
 page records the
 accepted decisions, the constraints they rest on, and the questions still
 open. Feed details are in
@@ -261,14 +261,17 @@ when a new one arrives, so that shuffling it plays songs the stations played
 recently. The oldest song is the one least recently played on any station,
 so a re-played song stays. Radio drops songs through Music.app, the same way
 it moves them, and a dropped song returns when a station plays it again.
-Dropped songs stay in the library. Since 2026-10-20,
+Dropped songs stay in the library. For one afternoon on 2026-10-20,
 [the song the user played most](#push-the-song-you-played-most-out-of-radio)
-leaves first.
+left first, until that rule
+[moved to "Radio (New)"](#split-off-radio-new-for-songs-the-user-hasnt-played-much).
 
 ### Push the song you played most out of "Radio"
 
 Accepted 2026-10-20. This changes which song leaves "Radio" in the decision
-above. The user asked Radio to read how often they had played each song in
+above. [Later that day](#split-off-radio-new-for-songs-the-user-hasnt-played-much),
+the rule moved to "Radio (New)", and "Radio" went back to the most recently
+played songs. The user asked Radio to read how often they had played each song in
 Music, and for a new song to push out the one they had played most, the
 oldest among ties. Asked about the details, the user chose:
 
@@ -310,6 +313,28 @@ The tradeoffs:
   "Radio" has fewer plays.
 - When Music.app can't be read, the sync skips Music.app, as for any
   failure, and choices use the counts last read.
+
+### Split off "Radio (New)" for songs the user hasn't played much
+
+Accepted 2026-10-20. This replaces the playlist that the
+[decision above](#push-the-song-you-played-most-out-of-radio) changed. The
+user asked for three playlists:
+
+- **"Radio"** keeps the 100 most recently played songs and drops the least
+  recently played, as it did before that decision.
+- **"Radio (New)"** keeps 100 songs by the rules in that decision, so it
+  holds songs the user hasn't already heard much.
+- **"Radio Archive"** doesn't change.
+
+The user chose the recommendation to keep their Music playlist "Radio",
+whose name carries any pin, download, or place in the sidebar. It went back
+to the most recently played songs, which returned the few songs the new rule
+had pushed out that afternoon. "Radio (New)" is a new playlist that
+Music.app makes on the next sync and fills with the songs Radio had chosen
+for "Radio", one Music.app call per song. Its page, `/playlists/new`, marks
+the song that leaves next, and the dashboard links to it beside the other
+two. The dashboard's "in Radio" badges and "Just added to Radio" lists
+still follow "Radio". "Radio" and "Radio (New)" share the 100-song limit.
 
 ### Add a larger "Radio Archive" playlist
 
@@ -548,7 +573,7 @@ mean something needs them, and other colors for everything else, with more
 variety than black, white, red, and green. Green marks a connected Apple
 Music and an empty review queue. Red marks songs to review, failures, and
 each song waiting on the review page. Links are blue, buttons are indigo, Jev's
-suggestions and picks are purple, playlist links and "in playlist" are teal,
+suggestions and picks are purple, playlist links and "in Radio" are teal,
 and "waiting to sync" is amber.
 
 Each station takes one of eight colors from its ID and keeps it on every
@@ -574,7 +599,8 @@ accepted both recommendations:
   last gave each song and asks Music.app only when the song's plays change
   it. Songs already in the playlists get comments on the first sync after
   the upgrade.
-- **Dashboard pages:** `/playlists/radio` and `/playlists/archive` list each
+- **Dashboard pages:** `/playlists/radio`, `/playlists/new` (added
+  2026-10-20), and `/playlists/archive` list each
   playlist's songs, most recently played first, with each station's play
   count and, since 2026-10-20, the user's plays and skips. The dashboard's
   playlist counts link to them.
@@ -684,9 +710,10 @@ and "Radio Archive".
   keeps its entries.
 - **Dropping songs:** for each playlist, each sync first drops, through
   Music.app, every entry for a song it shouldn't hold, and then places new
-  and re-played songs. "Radio" holds the songs Radio chose for it, and the
-  archive its limit of most recently played songs. An entry to drop that Music.app can't
-  find was removed by hand, and Radio forgets it.
+  and re-played songs. "Radio (New)" holds the songs Radio chose for it,
+  and "Radio" and the archive their limits of most recently played songs.
+  An entry to drop that Music.app can't find was removed by hand, and Radio
+  forgets it.
 - **Station credit:** a song added to "Radio" is credited to the station
   whose play placed it, which is its latest play at that time. The
   dashboard lists each station's credited songs as "just added".

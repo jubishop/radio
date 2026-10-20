@@ -44,20 +44,23 @@ six months.
 4. On the Mac mini, open <http://localhost:8102/auth> and sign in with the
    Apple ID that owns the library. Sign-in works only from the Mac mini.
 
-The next scheduled run matches songs and creates two playlists, which every
+The next scheduled run matches songs and creates three playlists, which every
 station feeds. Run `radio sync` to do it immediately.
 
-- **Radio** holds 100 songs the stations played recently, so shuffling it
-  plays what they played lately. When a new song joins, the song you've
-  played and skipped most in Music leaves, or among ties, the one the
-  stations played longest ago. A song you've played more than every song in
-  "Radio" stays out of it. Songs that leave stay in your library and the
-  archive. The dashboard's "Radio" page shows your plays and skips and marks
-  the song that leaves next.
+- **Radio** holds the 100 songs played most recently on any station, so
+  shuffling it plays what the stations played lately. When a new song joins,
+  the least recently played one leaves the playlist but stays in your
+  library.
+- **Radio (New)** holds 100 songs the stations played recently that you
+  haven't played much. When a new song joins, the song you've played and
+  skipped most in Music leaves, or among ties, the one the stations played
+  longest ago. A song you've played more than every song in "Radio (New)"
+  stays out of it. The dashboard's "Radio (New)" page shows your plays and
+  skips and marks the song that leaves next.
 - **Radio Archive** holds the 10,000 songs played most recently, and drops
-  the oldest the same way.
+  the oldest the same way as "Radio".
 
-Both playlists end with the most recently played song. Sort one by
+Every playlist ends with the most recently played song. Sort one by
 **Playlist Order, descending** to see it newest first.
 
 Music.app makes every change to the playlists, so Music.app on the Mac mini

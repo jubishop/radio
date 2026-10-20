@@ -133,7 +133,7 @@ func main(_ arguments: [String]) async throws -> Int32 {
             let station = try await radio.addStation(
                 slug: rest[1], source: try option("--source", in: rest) ?? "audacy", name: try option("--name", in: rest)
             )
-            print("Added \(station.name) (\(station.slug), feed \(station.feedID)). Its songs go into the \"\(Radio.playlistName)\" and \"\(Radio.archivePlaylistName)\" playlists.")
+            print("Added \(station.name) (\(station.slug), feed \(station.feedID)). Its songs go into the \"\(Radio.playlistName)\", \"\(Radio.newPlaylistName)\", and \"\(Radio.archivePlaylistName)\" playlists.")
         case "list":
             for station in try await radio.stations() {
                 print("\(station.slug)\t\(station.name)\t\(station.source):\(station.feedID)")
@@ -232,6 +232,7 @@ func main(_ arguments: [String]) async throws -> Int32 {
         if let error = status.musicAppError { print("Music.app: \(error)") }
         if let error = status.jevError { print("Jev: \(error)") }
         print("Playlist \"\(Radio.playlistName)\": \(status.playlistCount) of \(radio.playlistLimit) songs")
+        print("Playlist \"\(Radio.newPlaylistName)\": \(status.newCount) of \(radio.playlistLimit) songs")
         print("Playlist \"\(Radio.archivePlaylistName)\": \(status.archiveCount) of \(radio.archiveLimit) songs")
         for summary in status.stations {
             let station = summary.station

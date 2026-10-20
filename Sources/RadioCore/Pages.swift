@@ -49,6 +49,7 @@ enum Pages {
     private static func playlists(_ status: RadioStatus) -> String {
         let songs = "\(status.playlistCount) song\(status.playlistCount == 1 ? "" : "s")"
         return "<a class=\"pill playlist\" href=\"\(path(of: .recent))\">\(songs) in \(escape(Radio.playlistName))</a>\n"
+            + "<a class=\"pill playlist\" href=\"\(path(of: .unheard))\">\(status.newCount) in \(escape(Radio.newPlaylistName))</a>\n"
             + "<a class=\"pill playlist\" href=\"\(path(of: .archive))\">\(status.archiveCount) in \(escape(Radio.archivePlaylistName))</a>"
     }
 
@@ -56,16 +57,17 @@ enum Pages {
     static func path(of kind: Playlist.Kind) -> String {
         switch kind {
         case .recent: "/playlists/radio"
+        case .unheard: "/playlists/new"
         case .archive: "/playlists/archive"
         }
     }
 
     /// A playlist's songs, most recently played first, with the stations
     /// that played each one and how often, and the user's plays and skips.
-    /// "Radio" marks the song the next new one will push out.
+    /// "Radio (New)" marks the song the next new one will push out.
     static func playlist(_ kind: Playlist.Kind, name: String, entries: [PlaylistEntry]) -> String {
         let count = "\(entries.count) song\(entries.count == 1 ? "" : "s")"
-        let rule = kind == .recent
+        let rule = kind == .unheard
             ? " A new song pushes out the one you've played and skipped most in Music, or among ties, the one played longest ago."
             : ""
         var body = """
@@ -238,7 +240,7 @@ enum Pages {
         for play in summary.recentPlays {
             html += "<li><time>\(escape(shortTime(play.playedAt)))</time> \(escape(play.artist)) – \(escape(play.title)) \(badge(play.state))</li>"
         }
-        html += "</ol></div><div><h3>Just added to the playlist</h3>"
+        html += "</ol></div><div><h3>Just added to \(escape(Radio.playlistName))</h3>"
         if summary.recentlyAdded.isEmpty {
             html += "<p class=\"empty\">Nothing yet.</p>"
         } else {
@@ -253,7 +255,7 @@ enum Pages {
 
     private static func badge(_ state: PlayEntry.State) -> String {
         switch state {
-        case .added: "<span class=\"badge playlist\">in playlist</span>"
+        case .added: "<span class=\"badge playlist\">in \(escape(Radio.playlistName))</span>"
         case .waiting: "<span class=\"badge waiting\">waiting to sync</span>"
         case .held: "<a class=\"badge bad\" href=\"/review\">needs review</a>"
         case .ignored: "<span class=\"badge\">ignored</span>"

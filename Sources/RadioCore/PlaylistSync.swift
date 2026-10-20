@@ -8,14 +8,16 @@ struct MusicAppSession {
 }
 
 /// Keeps Radio's playlists in order of each song's latest play on any
-/// station: in "Radio", a few songs chosen by the user's plays and skips
-/// (see Listens.swift), and in "Radio Archive", many more of the most
-/// recently played. Music.app makes every change to the playlists: it adds
+/// station: a few of the most recently played in "Radio", a few chosen by the
+/// user's plays and skips in "Radio (New)" (see Listens.swift), and many
+/// more of the most recently played in "Radio Archive". Music.app makes
+/// every change to the playlists: it adds
 /// and moves songs by placing them at the end, and drops songs that fall past
 /// a playlist's limit. The web API only adds songs to the library, so
 /// Music.app can find them.
 extension Radio {
     public static let playlistName = "Radio"
+    public static let newPlaylistName = "Radio (New)"
     public static let archivePlaylistName = "Radio Archive"
 
     /// How long a song added to the library through the web API may take to
@@ -26,14 +28,15 @@ extension Radio {
     func name(of kind: Playlist.Kind) -> String {
         switch kind {
         case .recent: Self.playlistName
+        case .unheard: Self.newPlaylistName
         case .archive: Self.archivePlaylistName
         }
     }
 
-    /// How many of the most recently played songs a playlist keeps.
+    /// How many songs a playlist keeps.
     func limit(of kind: Playlist.Kind) -> Int {
         switch kind {
-        case .recent: playlistLimit
+        case .recent, .unheard: playlistLimit
         case .archive: archiveLimit
         }
     }
@@ -101,14 +104,15 @@ extension Radio {
         return removed
     }
 
-    /// Syncs "Radio" before the archive, so trouble in the much larger
-    /// archive can't hold it up. "Radio" holds the songs Radio chose by the
-    /// user's plays and skips (see Listens.swift). Without Music.app,
-    /// nothing changes. Returns the changes by playlist name.
+    /// Syncs "Radio" and "Radio (New)" before the archive, so trouble in
+    /// the much larger archive can't hold them up. "Radio (New)" holds the
+    /// songs Radio chose by the user's plays and skips (see Listens.swift).
+    /// Without Music.app, nothing changes. Returns the changes by playlist
+    /// name.
     func syncPlaylists(client: AppleMusicClient, music: inout MusicAppSession) async throws -> [String: PlaylistChanges] {
         guard musicApp != nil else { return [:] }
         try await readListens(music: &music)
-        try chooseRadioSongs()
+        try chooseUnheardSongs()
         var changes: [String: PlaylistChanges] = [:]
         for kind in Playlist.Kind.allCases {
             changes[name(of: kind)] = try await syncPlaylist(kind, client: client, music: &music)
@@ -245,9 +249,9 @@ extension Radio {
         guard let musicApp, music.failure == nil else { return nil }
         let limit = limit(of: playlist.kind).formatted()
         let description = switch playlist.kind {
-        case .recent: "\(limit) songs played recently on the stations Radio follows, most recent last. "
+        case .recent, .archive: "The \(limit) songs played most recently on the stations Radio follows, most recent last."
+        case .unheard: "\(limit) songs played recently on the stations Radio follows, most recent last. "
             + "Each new song pushes out the one you've played and skipped most."
-        case .archive: "The \(limit) songs played most recently on the stations Radio follows, most recent last."
         }
         let target = MusicAppPlaylist(id: playlist.musicID, name: name(of: playlist.kind), description: description)
         let result: MusicAppResult

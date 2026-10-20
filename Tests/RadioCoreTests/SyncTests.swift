@@ -28,7 +28,9 @@ import Testing
 
         #expect(report.playlists["Radio"]?.added == 2)
         #expect(report.playlists["Radio Archive"]?.added == 2)
-        #expect(harness.music.playlists() == ["Radio": ["Africa", "My Hero"], "Radio Archive": ["Africa", "My Hero"]])
+        #expect(harness.music.playlists() == [
+            "Radio": ["Africa", "My Hero"], "Radio (New)": ["Africa", "My Hero"], "Radio Archive": ["Africa", "My Hero"],
+        ])
     }
 
     @Test func laterSyncsAppendOnlyNewSongs() async throws {
@@ -60,7 +62,7 @@ import Testing
         harness.play("Foo Fighters", "Everlong", on: "101-2000", minutesAgo: 2)
         _ = try await harness.radio.run()
 
-        #expect(harness.music.playlistNames() == ["Radio", "Radio Archive"])
+        #expect(harness.music.playlistNames() == ["Radio", "Radio (New)", "Radio Archive"])
         #expect(harness.music.playlists()["Radio"] == ["Uprising", "Everlong"])
         #expect(harness.http.requests("GET https://api.music.apple.com/v1/catalog/us/search").count == 2)
         // Each song counts as added by the station whose play placed it.
@@ -120,7 +122,8 @@ import Testing
             "ALTER TABLE songs DROP COLUMN jev_checked_at", "ALTER TABLE songs DROP COLUMN jev_model",
             "ALTER TABLE songs DROP COLUMN jev_score", "ALTER TABLE songs DROP COLUMN jev_pick",
             "ALTER TABLE songs DROP COLUMN undone_at", "DROP TABLE playlist_removals",
-            "DROP TABLE listens", "DROP TABLE radio_choices",
+            "DROP TABLE listens", "DROP TABLE unheard_choices",
+            "DELETE FROM playlist_tracks WHERE playlist = 'unheard'", "DELETE FROM playlists WHERE kind = 'unheard'",
             "PRAGMA user_version = 6",
         ], in: harness.home)
         let clock = harness.clock
@@ -288,7 +291,9 @@ import Testing
         _ = try await harness.radio.run()
         _ = try await harness.radio.sync()
 
-        #expect(harness.music.playlists() == ["Radio": ["Africa", "Glycerine"], "Radio Archive": ["Africa", "Glycerine"]])
+        #expect(harness.music.playlists() == [
+            "Radio": ["Africa", "Glycerine"], "Radio (New)": ["Africa", "Glycerine"], "Radio Archive": ["Africa", "Glycerine"],
+        ])
     }
 
     @Test func aLargeBacklogFillsThePlaylistWithTheHundredLatestSongs() async throws {
@@ -337,7 +342,7 @@ import Testing
         async let b = second.sync()
         let reports = try await [a, b]
 
-        #expect(first.music.playlistNames() == ["Radio", "Radio Archive"])
+        #expect(first.music.playlistNames() == ["Radio", "Radio (New)", "Radio Archive"])
         #expect(first.music.playlists()["Radio"] == (0..<5).map { "Song \($0)" })
         #expect(reports.filter { $0.skippedReason != nil }.count == 1)
     }

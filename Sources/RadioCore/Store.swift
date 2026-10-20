@@ -40,7 +40,10 @@ struct Playlist {
     enum Kind: String, CaseIterable {
         /// "Radio": the most recently played songs.
         case recent
-        /// "Radio Archive": many more of them.
+        /// "Radio (New)": recently played songs the user hasn't played much
+        /// (see Listens.swift).
+        case unheard
+        /// "Radio Archive": many more of the most recently played.
         case archive
     }
 
@@ -83,7 +86,8 @@ struct PlaylistEntry {
     /// The comment Radio last gave the song in Music.app.
     var comment: String?
     var listens: Listens
-    /// True for the song the next new one will push out of a full "Radio".
+    /// True for the song the next new one will push out of a full
+    /// "Radio (New)".
     var dropsNext = false
 
     var latestPlay: Date? { stations.first?.latestPlay }
@@ -180,7 +184,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 10
+    private static let schemaVersion: Int64 = 11
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -198,6 +202,7 @@ final class Store {
             if version < 8 { try migrateToSchemaEight() }
             if version < 9 { try migrateToSchemaNine() }
             if version < 10 { try migrateToSchemaTen() }
+            if version < 11 { try migrateToSchemaEleven() }
         }
     }
 
@@ -417,6 +422,15 @@ final class Store {
             )
             """)
         try db.execute("PRAGMA user_version = 10")
+    }
+
+    /// Schema 11 adds "Radio (New)", which the user split from "Radio" on
+    /// 2026-10-20. Radio's choices, made for "Radio", fill it, and "Radio"
+    /// goes back to the most recently played songs.
+    private func migrateToSchemaEleven() throws {
+        try db.execute("ALTER TABLE radio_choices RENAME TO unheard_choices")
+        try db.execute("INSERT INTO playlists (kind) VALUES ('unheard')")
+        try db.execute("PRAGMA user_version = 11")
     }
 
     // MARK: Stations
@@ -777,12 +791,12 @@ final class Store {
     }
 
     /// The matched songs a playlist holds, played most recently on any
-    /// station, up to the bound limit. "Radio" holds only the songs Radio
-    /// chose for it (see Listens.swift). SQLite takes the bare columns from
-    /// the row that has the MAX, so each song's station is the one that
-    /// played it last.
+    /// station, up to the bound limit. "Radio (New)" holds only the songs
+    /// Radio chose for it (see Listens.swift). SQLite takes the bare columns
+    /// from the row that has the MAX, so each song's station is the one
+    /// that played it last.
     private static func recentSongs(_ kind: Playlist.Kind) -> String {
-        let chosen = kind == .recent ? " AND s.catalog_id IN (SELECT catalog_id FROM radio_choices WHERE chosen = 1)" : ""
+        let chosen = kind == .unheard ? " AND s.catalog_id IN (SELECT catalog_id FROM unheard_choices WHERE chosen = 1)" : ""
         return """
             recent AS (
                 SELECT s.id AS song_id, s.catalog_id, p.station_id, MAX(p.played_at) AS latest_played
