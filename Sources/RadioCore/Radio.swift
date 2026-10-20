@@ -517,6 +517,14 @@ public actor Radio {
         try store.playlistEntries(kind).reversed().sorted { ($0.latestPlay ?? .distantPast) > ($1.latestPlay ?? .distantPast) }
     }
 
+    func charts() throws -> Charts {
+        try store.charts(now: now())
+    }
+
+    func stats() throws -> Stats {
+        try store.stats(now: now())
+    }
+
     /// Every logged play as CSV, oldest first.
     public func exportCSV(stationSlug: String? = nil) throws -> String {
         var stationID: Int64?

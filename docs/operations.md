@@ -77,9 +77,10 @@ shows "sign-in expired". Repeat step 4.
 
 - **Dashboard:** <http://jubi.local:8102> from any device on the home network.
   It shows recent plays, songs just added, feed and sync health, and the
-  review queue. It refreshes every minute. Radio serves plain HTTP, so an
-  `https://` address fails at once; use `http://`. Away from home, a device
-  on the Mac's tailnet can open it at the Mac's full Tailscale name, such as
+  review queue, and links to the playlists, charts, and stats. It refreshes
+  every minute. Radio serves plain HTTP, so an `https://` address fails at
+  once; use `http://`. Away from home, a device on the Mac's tailnet can open
+  it at the Mac's full Tailscale name, such as
   `http://mac-mini.tail1234.ts.net:8102`, or its Tailscale IP address.
 - **Review:** <http://jubi.local:8102/review> lists songs needing review
   first, with Jev's suggestion when it has one, then every song Jev or you
@@ -97,6 +98,11 @@ shows "sign-in expired". Repeat step 4.
   Playlists can't show comments as a column, but the Songs view can: show its
   Comments column with View > Show View Options, and sort by it to list
   Radio's songs in play order.
+- **Charts and stats:** <http://jubi.local:8102/charts> ranks the last 7
+  days' 100 most played songs, with the station that played each last, and
+  the 100 most played since logging began, with every station's plays.
+  <http://jubi.local:8102/stats> shows each station's week, rising songs,
+  songs on the most stations, and top artists.
 - **Status and data:** `radio status`, and `radio export > plays.csv` for
   every logged play.
 - **More stations:** add each with its network's command. Its songs join

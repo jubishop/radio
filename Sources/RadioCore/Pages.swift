@@ -10,6 +10,8 @@ enum Pages {
               <p class="health">\(appleMusic(status.appleMusic, signInURL: signInURL))
                 \(review(count: status.heldCount))
                 \(playlists(status))
+                <a class="pill chart" href="/charts">Charts</a>
+                <a class="pill chart" href="/stats">Stats</a>
                 <span class="pill">Last sync \(status.lastSyncAt.map { escape(displayTime($0)) } ?? "never")</span></p>
             """
         if let error = status.lastSyncError {
@@ -81,12 +83,112 @@ enum Pages {
         return page(title: "\(name) · Radio", body: body + "</section>", refresh: false)
     }
 
+    /// The last week's 100 most played songs, each with the station that
+    /// played it last, then the 100 most played since logging began, each
+    /// with every station's plays. The user asked for both on 2026-10-20.
+    static func charts(_ charts: Charts) -> String {
+        var body = """
+            <header><p><a href="/">← Radio</a> · <a href="/stats">Stats</a></p><h1>Charts</h1>
+            <p class="meta">Plays on every station, counting each Apple Music song once however a station credits it.</p></header>
+            <section><h2>Top \(Store.chartLength) this week</h2>
+            <p class="meta">The songs played most in the last 7 days, with the station that played each one last.</p>
+            """
+        body += ranked(charts.week, empty: "No plays this week yet.") { song in
+            "\(link(song.url, "\(song.artist) – \(song.title)")) <span class=\"meta\">\(count(song.plays, "play")) · last</span> "
+                + "\(tag(stationID: song.latestStationID, name: song.latestStation)) <time>\(escape(shortTime(song.latestPlay)))</time>"
+        }
+        let since = charts.since.map { " since \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? ""
+        body += "</section><section><h2>Most played\(escape(since))</h2>"
+            + "<p class=\"meta\">Every station's plays of each song since Radio began logging them.</p>"
+        body += ranked(charts.allTime, empty: "No plays yet.") { song in
+            "\(link(song.url, "\(song.artist) – \(song.title)")) <span class=\"meta\">\(count(song.plays, "play"))</span> "
+                + song.stations.map(tag).joined(separator: " ")
+        }
+        return page(title: "Charts · Radio", body: body + "</section>", refresh: false)
+    }
+
+    /// Each station's last week, then the songs rising, the songs on the most
+    /// stations, and the top artists. The user asked on 2026-10-20 for more
+    /// to look at than the charts.
+    static func stats(_ stats: Stats) -> String {
+        var body = """
+            <header><p><a href="/">← Radio</a> · <a href="/charts">Charts</a></p><h1>Stats</h1>
+            <p class="meta">The last 7 days on every station.</p></header>
+            """
+        guard stats.stations.contains(where: { $0.plays > 0 }) else {
+            return page(title: "Stats · Radio", body: body + "<p class=\"empty\">No plays this week yet.</p>", refresh: false)
+        }
+        body += "<h2 class=\"group\">Stations</h2><div class=\"cards\">"
+        for station in stats.stations {
+            body += stationStats(station)
+        }
+        body += "</div><section><h2>Rising</h2>"
+            + "<p class=\"meta\">Songs played more in the last 2 days than in the 2 days before, most gained first.</p>"
+        body += ranked(stats.rising, empty: "Nothing is rising.") { rising in
+            "\(link(rising.song.url, "\(rising.song.artist) – \(rising.song.title)")) "
+                + "<span class=\"meta\">\(rising.song.plays) in the last 2 days, up from \(rising.previous)</span>"
+        }
+        body += "</section><section><h2>On the most stations</h2><p class=\"meta\">Songs more than one station played this week.</p>"
+        body += ranked(stats.widest, empty: "No song was played on two stations this week.") { song in
+            "\(link(song.url, "\(song.artist) – \(song.title)")) <span class=\"meta\">\(count(song.stations.count, "station"))</span> "
+                + song.stations.map(tag).joined(separator: " ")
+        }
+        body += "</section><section><h2>Top artists this week</h2>"
+        body += ranked(stats.artists, empty: "No plays this week yet.") { artist in
+            "\(escape(artist.artist)) <span class=\"meta\">\(count(artist.plays, "play")) · \(count(artist.songs, "song"))</span>"
+        }
+        return page(title: "Stats · Radio", body: body + "</section>", refresh: false)
+    }
+
+    private static func stationStats(_ stats: StationStats) -> String {
+        let perSong = stats.songs > 0 ? Double(stats.plays) / Double(stats.songs) : 0
+        var html = """
+            <section class="station \(color(ofStation: stats.stationID))"><h2>\(escape(stats.name))</h2>
+            <dl class="figures"><div><dt>Plays a day</dt><dd>\(decimal(stats.playsPerDay, digits: stats.playsPerDay < 10 ? 1 : 0))</dd></div>\
+            <div><dt>Songs</dt><dd>\(stats.songs)</dd></div>\
+            <div><dt>Plays per song</dt><dd>\(decimal(perSong, digits: 1))</dd></div>\
+            <div><dt>Only here</dt><dd>\(stats.onlyHere)</dd></div></dl>
+            """
+        if let top = stats.top {
+            let every = stats.topInterval.map { ", about every \(interval($0))" } ?? ""
+            html += "<p>Top song: \(link(top.url, "\(top.artist) – \(top.title)")) · \(count(top.plays, "play"))\(every)</p>"
+        } else {
+            html += "<p class=\"empty\">No plays this week.</p>"
+        }
+        return html + "</section>"
+    }
+
+    /// A numbered list, or `empty` when there's nothing to list.
+    private static func ranked<Item>(_ items: [Item], empty: String, _ row: (Item) -> String) -> String {
+        guard !items.isEmpty else { return "<p class=\"empty\">\(escape(empty))</p>" }
+        return "<ol>" + items.enumerated().map { "<li><span class=\"rank\">\($0.offset + 1)</span> \(row($0.element))</li>" }.joined()
+            + "</ol>"
+    }
+
+    /// Such as "1 play" or "3 plays".
+    private static func count(_ value: Int, _ noun: String) -> String {
+        "\(value) \(noun)\(value == 1 ? "" : "s")"
+    }
+
+    private static func decimal(_ value: Double, digits: Int) -> String {
+        value.formatted(.number.precision(.fractionLength(digits)))
+    }
+
+    /// Such as "45 minutes" or "3.7 hours".
+    private static func interval(_ seconds: TimeInterval) -> String {
+        seconds < 3600 ? count(Int((seconds / 60).rounded()), "minute") : "\(decimal(seconds / 3600, digits: 1)) hours"
+    }
+
     /// Links to the review page even with nothing waiting, since it also
     /// lists past decisions to undo.
     /// A station's name and how often it played the song, in its color.
     private static func tag(_ station: StationPlays) -> String {
-        let plays = station.plays > 1 ? " ×\(station.plays)" : ""
-        return "<span class=\"tag \(color(ofStation: station.stationID))\">\(escape(station.name))\(plays)</span>"
+        tag(stationID: station.stationID, name: station.name, plays: station.plays)
+    }
+
+    private static func tag(stationID: Int64, name: String, plays: Int = 1) -> String {
+        let plays = plays > 1 ? " ×\(plays)" : ""
+        return "<span class=\"tag \(color(ofStation: stationID))\">\(escape(name))\(plays)</span>"
     }
 
     /// One of eight colors, chosen by the station's ID so each station keeps
@@ -392,7 +494,7 @@ enum Pages {
         .s4 { --station: var(--s4); } .s5 { --station: var(--s5); } .s6 { --station: var(--s6); } .s7 { --station: var(--s7); }
         .tag { --c: var(--station); }
         .good { --c: var(--good); color: var(--c); } .bad { --c: var(--bad); color: var(--c); } .jev { --c: var(--jev); color: var(--c); }
-        .you { --c: var(--link); } .playlist { --c: var(--playlist); } .waiting { --c: var(--waiting); } .by { font-weight: 600; }
+        .you, .chart { --c: var(--link); } .playlist { --c: var(--playlist); } .waiting { --c: var(--waiting); } .by { font-weight: 600; }
         .station { border-top: 4px solid var(--station);
           background: linear-gradient(color-mix(in srgb, var(--station) 8%, var(--card)), var(--card) 120px); }
         .station h2::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%;
@@ -409,6 +511,12 @@ enum Pages {
         time { display: inline-block; min-width: 5.5em; font-variant-numeric: tabular-nums; }
         .candidates li { padding: 8px 0; } .row { display: flex; gap: 8px; margin-top: 8px; }
         h2.group { margin: 28px 0 0; }
+        .rank { display: inline-block; min-width: 2em; margin-right: 4px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 16px; margin: 16px 0; }
+        .cards section { margin: 0; }
+        .figures { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin: 12px 0; }
+        .figures dt { font-size: 13px; color: var(--muted); }
+        .figures dd { margin: 0; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
         details summary { margin-top: 8px; color: var(--muted); cursor: pointer; }
         .reviewed form { display: flex; align-items: center; gap: 12px; } .reviewed form div { flex: 1; min-width: 0; }
         input { flex: 1; min-width: 0; padding: 6px 8px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }

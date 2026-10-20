@@ -543,6 +543,37 @@ sync after the upgrade rewrites the comment of every song in the playlists,
 one Music.app call per song. After that, a play changes the latest time
 anyway, so the counts cost no extra calls.
 
+### Show charts and stats from every logged play
+
+Accepted 2026-10-20. Seeing how often the stations had played each playlist
+song, the user asked to keep that table viewable on the dashboard, with a top
+100 of current songs and the station that played each one last, and for more
+to look at. Two pages, linked from the dashboard and each other, count every
+logged play:
+
+- **Charts:** `/charts` ranks the 100 songs played most in the last 7 days,
+  each with the station that played it last and when, and then the 100
+  played most since logging began, each with every station's play count.
+- **Stats:** `/stats` covers the last 7 days. Each station gets a card with
+  its plays a day, songs, plays per song, songs no other station played, and
+  its top song with how often it came back. Then come the songs rising most
+  in the last 2 days over the 2 before, the songs on the most stations, and
+  the top artists.
+
+Both count every song matched to one Apple Music song as that song, as the
+playlist pages do, so differently credited plays add up. They leave out
+songs the user ignored. The week is rolling, ending now. Plays a day count
+only the part of the week since a station's first logged play, and at least
+a day, so a station added this week isn't undercounted.
+
+The tradeoffs:
+
+- Each page view counts every logged play. That was about 9,300 plays on
+  2026-10-20 and grows by about 1,300 a day, so the pages may need cached or
+  stored totals in time.
+- A station added within the last 4 days lifts its songs into "Rising",
+  since nothing was logged for the 2 days before.
+
 ### Send a daily review reminder by Pushover and email
 
 Accepted 2026-10-13. Once a week, Radio sends a Pushover message if songs were

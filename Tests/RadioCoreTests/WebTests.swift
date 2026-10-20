@@ -33,6 +33,8 @@ import Testing
         #expect(page.contains("in playlist"))
         #expect(page.contains(#"<a class="pill playlist" href="/playlists/radio">1 song in Radio</a>"#))
         #expect(page.contains(#"<a class="pill playlist" href="/playlists/archive">1 in Radio Archive</a>"#))
+        #expect(page.contains(#"<a class="pill chart" href="/charts">Charts</a>"#))
+        #expect(page.contains(#"<a class="pill chart" href="/stats">Stats</a>"#))
     }
 
     /// The review page also lists past decisions to undo, so the user asked
@@ -97,6 +99,140 @@ import Testing
         #expect(hit.lowerBound < saviorLink.lowerBound)
         #expect(archive.contains(#"<span class="tag s1">Rock 99</span> <span class="tag s0">Alt 102.1 ×2</span>"#))
         #expect(missing.status == 404)
+    }
+
+    /// The user asked on 2026-10-20 to keep every song's plays on every
+    /// station viewable, and for a top 100 with the station that played each
+    /// song last.
+    @Test func theChartsPageRanksThisWeeksSongsAndEverySongSinceLoggingBegan() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        _ = try await harness.radio.addStation(slug: "rock")
+        let savior = harness.music.addToCatalog("Rise Against", "Savior")
+        let hitSong = harness.music.addToCatalog("Tom & Jerry", "<Hit>")
+        harness.music.addToCatalog("Old Band", "Old Song")
+        let firstPlay = harness.clock.now.addingTimeInterval(-40 * 60)
+        for minutesAgo in [40.0, 30, 20, 10] {
+            harness.play("Old Band", "Old Song", minutesAgo: minutesAgo)
+        }
+        _ = try await harness.radio.run()
+        harness.clock.advance(days: 8)
+        harness.play("Rise Against", "Savior", minutesAgo: 50)
+        harness.play("Rise Against", "Savior", minutesAgo: 40)
+        harness.play("Tom & Jerry", "<Hit>", minutesAgo: 30)
+        harness.play("Rise Against", "Savior", on: "101-2000", minutesAgo: 20)
+        _ = try await harness.radio.run()
+
+        let page = text(await Dashboard(radio: harness.radio).handle(request("GET", "/charts")))
+
+        #expect(page.contains("<h1>Charts</h1>"))
+        #expect(page.contains(#"<a href="/stats">Stats</a>"#))
+        let since = firstPlay.formatted(.dateTime.month(.abbreviated).day())
+        let sections = page.components(separatedBy: "<h2>Most played since \(since)</h2>")
+        try #require(sections.count == 2)
+        let (week, allTime) = (sections[0], sections[1])
+        #expect(week.contains("<h2>Top 100 this week</h2>"))
+        // Most played first, each with the station that played it last.
+        let saviorLink = #"<a href="\#(savior.url)" target="_blank" rel="noopener">Rise Against – Savior</a>"#
+        #expect(week.contains(#"<span class="rank">1</span> \#(saviorLink) <span class="meta">3 plays · last</span> <span class="tag s1">Rock 99</span>"#))
+        let hitLink = #"<a href="\#(hitSong.url)" target="_blank" rel="noopener">Tom &amp; Jerry – &lt;Hit&gt;</a>"#
+        #expect(week.contains(#"<span class="rank">2</span> \#(hitLink) <span class="meta">1 play · last</span> <span class="tag s0">Alt 102.1</span>"#))
+        // Plays older than a week count only since logging began.
+        #expect(!week.contains("Old Song"))
+        let order = ["Old Band – Old Song", "Rise Against – Savior", "Tom &amp; Jerry – &lt;Hit&gt;"]
+        let positions = order.map { allTime.range(of: $0)?.lowerBound }
+        #expect(!positions.contains(nil))
+        #expect(positions.compactMap { $0 } == positions.compactMap { $0 }.sorted())
+        #expect(allTime.contains(#"Old Band – Old Song</a> <span class="meta">4 plays</span> <span class="tag s0">Alt 102.1 ×4</span></li>"#))
+        #expect(allTime.contains(#"\#(saviorLink) <span class="meta">3 plays</span> <span class="tag s0">Alt 102.1 ×2</span> <span class="tag s1">Rock 99</span></li>"#))
+    }
+
+    /// Every song matched to one Apple Music song counts as that song, as on
+    /// the playlist pages, and songs the user ignored stay off the charts.
+    @Test func theChartsCountEachAppleMusicSongOnceAndLeaveOutIgnoredSongs() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        let song = harness.music.addToCatalog("Nirvana", "Come As You Are")
+        harness.play("Nirvana", "Come As You Are", minutesAgo: 3)
+        // Radio keeps a title's featured credit in its song keys, so it logs
+        // this as another song.
+        harness.play("Nirvana", "Come As You Are Ft. Dave Grohl", minutesAgo: 2)
+        harness.play("Unknown Band", "Demo", minutesAgo: 1)
+        _ = try await harness.radio.run()
+        let held = try await harness.radio.heldSongs()
+        let credited = try #require(held.first { $0.title == "Come As You Are Ft. Dave Grohl" })
+        let unknown = try #require(held.first { $0.artist == "Unknown Band" })
+        _ = try await harness.radio.match(songID: credited.id, choice: .link(song.url))
+        try await harness.radio.ignore(songID: unknown.id)
+        let dashboard = Dashboard(radio: harness.radio)
+
+        let charts = text(await dashboard.handle(request("GET", "/charts")))
+        let stats = text(await dashboard.handle(request("GET", "/stats")))
+
+        #expect(charts.contains(#"Nirvana – Come As You Are</a> <span class="meta">2 plays · last</span>"#))
+        #expect(charts.contains(#"Nirvana – Come As You Are</a> <span class="meta">2 plays</span> <span class="tag s0">Alt 102.1 ×2</span>"#))
+        #expect(!charts.contains("Unknown Band"))
+        #expect(!stats.contains("Unknown Band"))
+    }
+
+    /// The user asked on 2026-10-20 for more to look at than the charts.
+    @Test func theStatsPageSummarizesEachStationsWeek() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        _ = try await harness.radio.addStation(slug: "rock")
+        harness.music.addToCatalog("Rise Against", "Savior")
+        harness.music.addToCatalog("Tom & Jerry", "<Hit>")
+        harness.play("Rise Against", "Savior", minutesAgo: 4000)
+        harness.play("Rise Against", "Savior", minutesAgo: 600)
+        harness.play("Rise Against", "Savior", minutesAgo: 300)
+        harness.play("Tom & Jerry", "<Hit>", minutesAgo: 200)
+        harness.play("Rise Against", "Savior", on: "101-2000", minutesAgo: 100)
+        _ = try await harness.radio.run()
+
+        let page = text(await Dashboard(radio: harness.radio).handle(request("GET", "/stats")))
+
+        #expect(page.contains("<h1>Stats</h1>"))
+        #expect(page.contains(#"<a href="/charts">Charts</a>"#))
+        // Alt 102.1 logged 4 plays over about 2.8 days, of 2 songs, one of
+        // them played nowhere else; Savior came back every 1,850 minutes.
+        let alt = try #require(page.components(separatedBy: #"<section class="station s0">"#).dropFirst().first)
+        #expect(alt.contains("<h2>Alt 102.1</h2>"))
+        #expect(alt.contains("<dt>Plays a day</dt><dd>1.4</dd>"))
+        #expect(alt.contains("<dt>Songs</dt><dd>2</dd>"))
+        #expect(alt.contains("<dt>Plays per song</dt><dd>2.0</dd>"))
+        #expect(alt.contains("<dt>Only here</dt><dd>1</dd>"))
+        #expect(alt.contains("Rise Against – Savior</a> · 3 plays, about every 30.8 hours"))
+        let rock = try #require(page.components(separatedBy: #"<section class="station s1">"#).dropFirst().first)
+        #expect(rock.contains("<dt>Only here</dt><dd>0</dd>"))
+        #expect(rock.contains("Rise Against – Savior</a> · 1 play</p>"))
+        let rising = try #require(page.components(separatedBy: "<h2>Rising</h2>").dropFirst().first)
+        #expect(rising.contains(#"Rise Against – Savior</a> <span class="meta">3 in the last 2 days, up from 1</span>"#))
+        #expect(rising.contains(#"Tom &amp; Jerry – &lt;Hit&gt;</a> <span class="meta">1 in the last 2 days, up from 0</span>"#))
+        // Most gained first.
+        let gained = try #require(rising.range(of: "Savior"))
+        #expect(gained.lowerBound < (rising.range(of: "Hit")?.lowerBound ?? rising.startIndex))
+        let widest = try #require(page.components(separatedBy: "<h2>On the most stations</h2>").dropFirst().first)
+        #expect(widest.contains(#"Rise Against – Savior</a> <span class="meta">2 stations</span> <span class="tag s0">Alt 102.1 ×3</span> <span class="tag s1">Rock 99</span>"#))
+        #expect(!widest.components(separatedBy: "</section>")[0].contains("Hit"))
+        let artists = try #require(page.components(separatedBy: "<h2>Top artists this week</h2>").dropFirst().first)
+        #expect(artists.contains(#"<span class="rank">1</span> Rise Against <span class="meta">4 plays · 1 song</span>"#))
+        #expect(artists.contains(#"<span class="rank">2</span> Tom &amp; Jerry <span class="meta">1 play · 1 song</span>"#))
+    }
+
+    @Test func theChartsAndStatsPagesWaitForPlays() async throws {
+        let dashboard = Dashboard(radio: try Harness().radio)
+
+        let charts = await dashboard.handle(request("GET", "/charts"))
+        let stats = await dashboard.handle(request("GET", "/stats"))
+
+        #expect(charts.status == 200)
+        #expect(text(charts).contains("<h2>Most played</h2>"))
+        #expect(text(charts).contains(#"<p class="empty">No plays this week yet.</p>"#))
+        #expect(stats.status == 200)
+        #expect(text(stats).contains(#"<p class="empty">No plays this week yet.</p>"#))
     }
 
     @Test func theReviewPageMatchesAndIgnoresSongs() async throws {
