@@ -96,7 +96,8 @@ shows "sign-in expired". Repeat step 4.
   sends one back. Once a day, while any song is waiting, Radio sends a
   Pushover message and an email that lists those songs, and both link to the
   review page.
-- **Playlists:** <http://jubi.local:8102/playlists/radio> and
+- **Playlists:** <http://jubi.local:8102/playlists/radio>,
+  <http://jubi.local:8102/playlists/new>, and
   <http://jubi.local:8102/playlists/archive> list each playlist's songs with
   the stations that played them. In Music, each song's comment gives its
   latest play and how often each station played it, such as
@@ -112,7 +113,8 @@ shows "sign-in expired". Repeat step 4.
 - **Status and data:** `radio status`, and `radio export > plays.csv` for
   every logged play.
 - **More stations:** add each with its network's command. Its songs join
-  the "Radio" and "Radio Archive" playlists.
+  the "Radio", "Radio (New)", and "Radio Archive" playlists, under the rules
+  above.
   - Audacy: `radio station add <slug>`, where the slug is the path in the
     station's audacy.com URL, such as `alt1021rva`.
   - iHeartRadio: `radio station add <site> --source iheart`, where the site is

@@ -334,7 +334,7 @@ Music.app makes on the next sync and fills with the songs Radio had chosen
 for "Radio", one Music.app call per song. Its page, `/playlists/new`, marks
 the song that leaves next, and the dashboard links to it beside the other
 two. The dashboard's "in Radio" badges and "Just added to Radio" lists
-still follow "Radio". "Radio" and "Radio (New)" share the 100-song limit.
+still follow "Radio". "Radio" and "Radio (New)" each keep 100 songs.
 
 ### Add a larger "Radio Archive" playlist
 
