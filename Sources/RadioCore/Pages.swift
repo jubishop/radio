@@ -87,8 +87,8 @@ enum Pages {
             for entry in entries {
                 let time = entry.latestPlay.map { "<time>\(escape(shortTime($0)))</time> " } ?? ""
                 let stations = entry.stations.map(tag).joined(separator: " ")
-                let released = kind == .newest
-                    ? " <span class=\"released\">released \(escape(entry.releaseDate ?? "date unknown"))</span>" : ""
+                let released = entry.releaseDate.map { " <span class=\"released\">released \(escape($0))</span>" }
+                    ?? (kind == .newest ? " <span class=\"released\">released date unknown</span>" : "")
                 let drop = entry.dropsNext ? " <span class=\"badge drop\">drops next</span>" : ""
                 body += "<li>\(time)\(link(entry.url, "\(entry.artist) – \(entry.title)")) \(stations)\(released)"
                     + "\(listens(entry.listens))\(drop)</li>"
@@ -117,22 +117,23 @@ enum Pages {
             <p class="meta">The songs played most in the last 7 days, with the station that played each one last.</p>
             """
         body += ranked(charts.week, empty: "No plays this week yet.") { song in
-            "\(link(song.url, "\(song.artist) – \(song.title)")) <span class=\"meta\">\(count(song.plays, "play")) · last</span> "
+            "\(link(song.url, "\(song.artist) – \(song.title)"))\(year(song.releaseDate)) <span class=\"meta\">\(count(song.plays, "play")) · last</span> "
                 + "\(tag(stationID: song.latestStationID, name: song.latestStation)) <time>\(escape(shortTime(song.latestPlay)))</time>"
         }
         let since = charts.since.map { " since \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? ""
         body += "</section><section><h2>Most played\(escape(since))</h2>"
             + "<p class=\"meta\">Every station's plays of each song since Radio began logging them.</p>"
         body += ranked(charts.allTime, empty: "No plays yet.") { song in
-            "\(link(song.url, "\(song.artist) – \(song.title)")) <span class=\"meta\">\(count(song.plays, "play"))</span> "
+            "\(link(song.url, "\(song.artist) – \(song.title)"))\(year(song.releaseDate)) <span class=\"meta\">\(count(song.plays, "play"))</span> "
                 + song.stations.map(tag).joined(separator: " ")
         }
         return page(title: "Charts · Radio", body: body + "</section>", refresh: false)
     }
 
-    /// Each station's last week, then the songs rising, the songs on the most
-    /// stations, and the top artists. The user asked on 2026-10-20 for more
-    /// to look at than the charts.
+    /// Each station's last week, the song-age charts (see StatsCharts.swift),
+    /// then the songs rising, the songs on the most stations, the songs
+    /// stations share, and the top artists. The user asked on 2026-10-20 for
+    /// more to look at than the charts.
     static func stats(_ stats: Stats) -> String {
         var body = """
             <header><p><a href="/">← Radio</a> · <a href="/charts">Charts</a></p><h1>Stats</h1>
@@ -145,18 +146,18 @@ enum Pages {
         for station in stats.stations {
             body += stationStats(station)
         }
-        body += "</div><section><h2>Rising</h2>"
+        body += "</div>" + decades(stats) + hours(stats) + newReleases(stats) + deepCuts(stats) + "<section><h2>Rising</h2>"
             + "<p class=\"meta\">Songs played more in the last 2 days than in the 2 days before, most gained first.</p>"
         body += ranked(stats.rising, empty: "Nothing is rising.") { rising in
-            "\(link(rising.song.url, "\(rising.song.artist) – \(rising.song.title)")) "
+            "\(link(rising.song.url, "\(rising.song.artist) – \(rising.song.title)"))\(year(rising.song.releaseDate)) "
                 + "<span class=\"meta\">\(rising.song.plays) in the last 2 days, up from \(rising.previous)</span>"
         }
         body += "</section><section><h2>On the most stations</h2><p class=\"meta\">Songs more than one station played this week.</p>"
         body += ranked(stats.widest, empty: "No song was played on two stations this week.") { song in
-            "\(link(song.url, "\(song.artist) – \(song.title)")) <span class=\"meta\">\(count(song.stations.count, "station"))</span> "
-                + song.stations.map(tag).joined(separator: " ")
+            "\(link(song.url, "\(song.artist) – \(song.title)"))\(year(song.releaseDate)) "
+                + "<span class=\"meta\">\(count(song.stations.count, "station"))</span> " + song.stations.map(tag).joined(separator: " ")
         }
-        body += "</section><section><h2>Top artists this week</h2>"
+        body += "</section>" + sharedSongs(stats) + "<section><h2>Top artists this week</h2>"
         body += ranked(stats.artists, empty: "No plays this week yet.") { artist in
             "\(escape(artist.artist)) <span class=\"meta\">\(count(artist.plays, "play")) · \(count(artist.songs, "song"))</span>"
         }
@@ -174,26 +175,26 @@ enum Pages {
             """
         if let top = stats.top {
             let every = stats.topInterval.map { ", about every \(interval($0))" } ?? ""
-            html += "<p>Top song: \(link(top.url, "\(top.artist) – \(top.title)")) · \(count(top.plays, "play"))\(every)</p>"
+            html += "<p>Top song: \(link(top.url, "\(top.artist) – \(top.title)"))\(year(top.releaseDate)) · \(count(top.plays, "play"))\(every)</p>"
         } else {
             html += "<p class=\"empty\">No plays this week.</p>"
         }
-        return html + "</section>"
+        return html + songAges(stats.ages) + "</section>"
     }
 
     /// A numbered list, or `empty` when there's nothing to list.
-    private static func ranked<Item>(_ items: [Item], empty: String, _ row: (Item) -> String) -> String {
+    static func ranked<Item>(_ items: [Item], empty: String, _ row: (Item) -> String) -> String {
         guard !items.isEmpty else { return "<p class=\"empty\">\(escape(empty))</p>" }
         return "<ol>" + items.enumerated().map { "<li><span class=\"rank\">\($0.offset + 1)</span> \(row($0.element))</li>" }.joined()
             + "</ol>"
     }
 
     /// Such as "1 play" or "3 plays".
-    private static func count(_ value: Int, _ noun: String) -> String {
+    static func count(_ value: Int, _ noun: String) -> String {
         "\(value) \(noun)\(value == 1 ? "" : "s")"
     }
 
-    private static func decimal(_ value: Double, digits: Int) -> String {
+    static func decimal(_ value: Double, digits: Int) -> String {
         value.formatted(.number.precision(.fractionLength(digits)))
     }
 
@@ -205,18 +206,18 @@ enum Pages {
     /// Links to the review page even with nothing waiting, since it also
     /// lists past decisions to undo.
     /// A station's name and how often it played the song, in its color.
-    private static func tag(_ station: StationPlays) -> String {
+    static func tag(_ station: StationPlays) -> String {
         tag(stationID: station.stationID, name: station.name, plays: station.plays)
     }
 
-    private static func tag(stationID: Int64, name: String, plays: Int = 1) -> String {
+    static func tag(stationID: Int64, name: String, plays: Int = 1) -> String {
         let plays = plays > 1 ? " ×\(plays)" : ""
         return "<span class=\"tag \(color(ofStation: stationID))\">\(escape(name))\(plays)</span>"
     }
 
     /// One of eight colors, chosen by the station's ID so each station keeps
     /// its color on every page.
-    private static func color(ofStation id: Int64) -> String {
+    static func color(ofStation id: Int64) -> String {
         "s\((id - 1) % 8)"
     }
 
@@ -246,7 +247,8 @@ enum Pages {
         }
         html += "<div class=\"columns\"><div><h3>Recent plays</h3><ol>"
         for play in summary.recentPlays {
-            html += "<li><time>\(escape(shortTime(play.playedAt)))</time> \(escape(play.artist)) – \(escape(play.title)) \(badge(play.state))</li>"
+            html += "<li><time>\(escape(shortTime(play.playedAt)))</time> \(escape(play.artist)) – \(escape(play.title))\(year(play.releaseDate)) "
+                + "\(badge(play.state))</li>"
         }
         html += "</ol></div><div><h3>Just added to \(escape(Radio.playlistName))</h3>"
         if summary.recentlyAdded.isEmpty {
@@ -254,7 +256,8 @@ enum Pages {
         } else {
             html += "<ol>"
             for track in summary.recentlyAdded {
-                html += "<li><time>\(escape(shortTime(track.addedAt)))</time> \(link(track.url, "\(track.artist) – \(track.title)"))</li>"
+                html += "<li><time>\(escape(shortTime(track.addedAt)))</time> \(link(track.url, "\(track.artist) – \(track.title)"))"
+                    + "\(year(track.releaseDate))</li>"
             }
             html += "</ol>"
         }
@@ -378,7 +381,7 @@ enum Pages {
               <input type="hidden" name="candidate" value="\(index)">
               <button\(quiet)>Use \(candidateLetter(index))</button>
               \(link(candidate.url, "\(candidate.artistName) – \(candidate.name)"))\(explicit)\(isPick ? " <span class=\"badge jev\">Jev's pick</span>" : "")
-              <span class="meta">\(escape(candidate.albumName))</span>
+              <span class="meta">\(escape(candidate.albumName))\(candidate.releaseDate.map { " · " + escape(String($0.prefix(4))) } ?? "")</span>
             </form></li>
             """
     }
@@ -460,7 +463,7 @@ enum Pages {
         page(title: "Error · Radio", body: "<h1>Something went wrong</h1><p class=\"problem\">\(escape(message))</p>", refresh: false)
     }
 
-    private static func link(_ url: String?, _ text: String) -> String {
+    static func link(_ url: String?, _ text: String) -> String {
         guard let url, url.hasPrefix("https://") else { return escape(text) }
         return "<a href=\"\(escape(url))\" target=\"_blank\" rel=\"noopener\">\(escape(text))</a>"
     }
@@ -549,6 +552,7 @@ enum Pages {
         button.quiet { background: none; color: var(--muted); border-color: var(--line); }
         button:disabled { opacity: .5; cursor: default; }
         code { font: 13px ui-monospace, SFMono-Regular, monospace; }
+        \(chartStyles)
         </style>
         </head>
         <body>

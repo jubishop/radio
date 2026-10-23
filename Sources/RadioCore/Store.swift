@@ -113,6 +113,8 @@ public struct PlayEntry: Equatable, Sendable {
     public var title: String
     public var state: State
     public var url: String?
+    /// The release date of the song it matched, as Apple gives it.
+    public var releaseDate: String?
 }
 
 public struct AddedTrack: Equatable, Sendable {
@@ -120,6 +122,7 @@ public struct AddedTrack: Equatable, Sendable {
     public var artist: String
     public var title: String
     public var url: String?
+    public var releaseDate: String?
 }
 
 /// A song held back for review.
@@ -547,10 +550,11 @@ final class Store {
     func recentPlays(stationID: Int64, limit: Int) throws -> [PlayEntry] {
         try db.query(
             """
-            SELECT p.played_at, p.artist, p.title, s.status, s.catalog_url,
+            SELECT p.played_at, p.artist, p.title, s.status, s.catalog_url, r.released,
                 EXISTS (SELECT 1 FROM playlist_tracks t
                         WHERE t.playlist = 'recent' AND t.song_id = p.song_id) AS added
             FROM plays p JOIN songs s ON s.id = p.song_id
+            LEFT JOIN release_dates r ON r.catalog_id = s.catalog_id AND s.status = 'matched'
             WHERE p.station_id = ? ORDER BY p.played_at DESC LIMIT ?
             """,
             [.integer(stationID), .integer(Int64(limit))]
@@ -565,7 +569,8 @@ final class Store {
                 artist: row.string("artist")!,
                 title: row.string("title")!,
                 state: state,
-                url: row.string("catalog_url")
+                url: row.string("catalog_url"),
+                releaseDate: row.string("released").flatMap { $0.isEmpty ? nil : $0 }
             )
         }
     }
@@ -1033,14 +1038,16 @@ final class Store {
     func recentlyAdded(stationID: Int64, limit: Int) throws -> [AddedTrack] {
         try db.query(
             """
-            SELECT t.added_at, s.artist, s.title, s.catalog_url
+            SELECT t.added_at, s.artist, s.title, s.catalog_url, r.released
             FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
+            LEFT JOIN release_dates r ON r.catalog_id = t.catalog_id
             WHERE t.playlist = 'recent' AND t.station_id = ? ORDER BY t.added_at DESC, t.rowid DESC LIMIT ?
             """,
             [.integer(stationID), .integer(Int64(limit))]
         ).map {
             AddedTrack(addedAt: parseISODate($0.string("added_at")!)!, artist: $0.string("artist")!,
-                       title: $0.string("title")!, url: $0.string("catalog_url"))
+                       title: $0.string("title")!, url: $0.string("catalog_url"),
+                       releaseDate: $0.string("released").flatMap { $0.isEmpty ? nil : $0 })
         }
     }
 

@@ -705,6 +705,68 @@ The tradeoffs:
 - A station added within the last 4 days lifts its songs into "Rising",
   since nothing was logged for the 2 days before.
 
+### Show release dates and how old each station's songs are
+
+Accepted 2026-10-22. Once Radio kept each song's
+[release date](#add-radio-new-for-the-newest-releases), the user asked to
+see release dates on the dashboard and how old the songs each station plays
+are, and invited ideas for more. Asked which extras to add, the user chose
+all four offered: new releases, ages by hour, decades with deep cuts, and
+shared songs.
+
+- **Release dates:** song lists show each song's release year: the
+  dashboard's recent plays and "Just added", the charts, the stats page,
+  and the review page's candidates. Playlist pages show the full date.
+- **Song ages:** each station's card on `/stats` gives its songs' average
+  age and median release year this week, and the shares under a year old and
+  10 or more years old, and names its oldest song. A song's age is the time
+  from its release to the play. A year alone counts from that year's middle.
+- **Decades:** a 100% bar for each station, and one for every station
+  together, splits the week's plays by release decade. The first decade is
+  open-ended, such as "Before 1990" in the 2020s.
+- **Song age by hour:** a heatmap shows how much older or newer each
+  station's songs ran in each hour of the day than its weekly average, in
+  the Mac's time zone. An hour needs 10 plays.
+- **New releases:** songs released in the last 60 days that any station
+  played, newest first, with every station's plays and which station played
+  each first. A first play counts only the stations Radio was logging on the
+  release day, so a station added later can't be beaten to a song by one
+  Radio was already logging. A table counts each station's new releases and
+  firsts.
+- **Deep cuts:** the 10 oldest songs the stations played this week.
+- **Shared songs:** a grid of how many songs each pair of stations both
+  played this week, with each station's own count on the diagonal.
+
+The charts follow a data-visualization method that picks each form and color
+by the data's job, and every chart's values are also in a table, with each
+mark's value on hover or keyboard focus. Decades are ordered, so they take
+one blue ramp, darker for older decades in light mode and lighter in dark
+mode. The hours show polarity around each station's own average, so they
+take a diverging scale, blue for newer and orange for older, with a neutral
+gray within half a year and steps at 1.5, 3, and 5 years; orange rather than
+red, so older songs don't read as bad. On 2026-10-22, half the station-hours
+were within a year of their average and a few were more than 3 years off.
+Shared songs are exact counts in a table, lightly shaded in one blue. The
+decade ramp passed the palette validator's ordinal checks in both modes
+against the dashboard's card colors. The heatmap's arms passed its checks
+for one hue, monotone lightness, and visible steps. Their faintest steps sit
+near the gray midpoint by design, so they don't meet the contrast floor for
+ordinal marks.
+
+The first week, from 2026-10-16, showed what the pages are for. The pop
+stations, Hits 106.1 and MOViN 92.5, averaged 3 to 4 years per song. The
+alternative stations, Alt 102.1, 107.7 The End, and DC101, averaged about
+16, and about 60% of their plays were 10 or more years old. They also ran 3
+to 5 years newer in the evening. Of the 42 songs released in the 60 days
+before, Alt 102.1 played 7 of the 2026-10-16 releases first, between about
+10 PM and 12:45 AM Eastern on Sunday, 2026-10-18.
+
+The tradeoffs:
+
+- "First" can't count songs released before Radio logged any of the
+  stations, so it starts thin and fills in over time.
+- Hours use the Mac's time zone, not each station's.
+
 ### Send a daily review reminder by Pushover and email
 
 Accepted 2026-10-13. Once a week, Radio sends a Pushover message if songs were

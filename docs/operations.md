@@ -116,8 +116,12 @@ shows "sign-in expired". Repeat step 4.
 - **Charts and stats:** <http://jubi.local:8102/charts> ranks the last 7
   days' 100 most played songs, with the station that played each last, and
   the 100 most played since logging began, with every station's plays.
-  <http://jubi.local:8102/stats> shows each station's week, rising songs,
-  songs on the most stations, and top artists.
+  <http://jubi.local:8102/stats> shows each station's week and how old its
+  songs are, plays by release decade, song ages by hour, new releases and
+  which station played each first, the oldest songs played, rising songs,
+  songs on the most stations, the songs each pair of stations shares, and
+  top artists. Song lists across the dashboard show each song's release
+  year.
 - **Status and data:** `radio status`, and `radio export > plays.csv` for
   every logged play.
 - **More stations:** add each with its network's command. Its songs join

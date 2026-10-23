@@ -11,6 +11,8 @@ struct ChartSong {
     /// The station that played it last.
     var latestStationID: Int64
     var latestStation: String
+    /// As Apple gives it, such as "2026-10-02"; nil when Apple has none.
+    var releaseDate: String?
     /// Each station's plays of it, most first, where a page shows them.
     var stations: [StationPlays] = []
 }
@@ -25,7 +27,7 @@ struct Charts {
     var allTime: [ChartSong]
 }
 
-/// The `/stats` page, counted over the last week.
+/// The `/stats` page, counted over the last week, except new releases.
 struct Stats {
     var stations: [StationStats]
     /// Songs played more in the last two days than the two before, most
@@ -34,6 +36,15 @@ struct Stats {
     /// Songs played by two or more stations, most stations first.
     var widest: [ChartSong]
     var artists: [ArtistPlays]
+    /// Every station's song ages together, when any song had a date.
+    var ages: SongAges?
+    var decades: [String]
+    /// Songs released in the last 60 days, over every logged play.
+    var newReleases: [NewRelease]
+    var newReleaseCounts: [NewReleaseCounts]
+    var deepCuts: [ChartSong]
+    /// Songs both stations of each pair played, by station ID.
+    var shared: [Int64: [Int64: Int]]
 }
 
 struct StationStats {
@@ -48,6 +59,8 @@ struct StationStats {
     var top: ChartSong?
     /// The average time between the top song's plays, when it has two.
     var topInterval: TimeInterval?
+    /// Nil when no song it played had a release date.
+    var ages: SongAges?
 }
 
 struct RisingSong {
@@ -69,23 +82,27 @@ extension Store {
     static let risingWindow: TimeInterval = 2 * 24 * 60 * 60
 
     /// Every play except those of ignored songs, keyed by the song it counts
-    /// toward, with that song's Apple Music name when it's matched.
-    private static let charted = """
+    /// toward, with that song's Apple Music name and release date when it's
+    /// matched. A song without a release date has none, rather than an
+    /// empty one.
+    static let charted = """
         charted AS (
             SELECT p.station_id, st.name AS station, p.played_at,
                 COALESCE(CASE WHEN s.status = 'matched' THEN s.catalog_id END, 'song:' || s.id) AS song_key,
                 CASE WHEN s.status = 'matched' THEN COALESCE(s.catalog_artist, s.artist) ELSE s.artist END AS artist,
                 CASE WHEN s.status = 'matched' THEN COALESCE(s.catalog_name, s.title) ELSE s.title END AS title,
-                CASE WHEN s.status = 'matched' THEN s.catalog_url END AS url
+                CASE WHEN s.status = 'matched' THEN s.catalog_url END AS url,
+                CASE WHEN s.status = 'matched' THEN NULLIF(r.released, '') END AS released
             FROM plays p JOIN songs s ON s.id = p.song_id JOIN stations st ON st.id = p.station_id
+            LEFT JOIN release_dates r ON r.catalog_id = s.catalog_id
             WHERE s.status != 'ignored'
         )
         """
 
     /// Columns a `ChartSong` reads from a group of `charted` rows. SQLite
     /// takes the bare station columns from the row with the latest play.
-    private static let chartColumns = """
-        song_key, artist, title, url, COUNT(*) AS plays, MAX(played_at) AS latest_played, station_id, station
+    static let chartColumns = """
+        song_key, artist, title, url, released, COUNT(*) AS plays, MAX(played_at) AS latest_played, station_id, station
         """
 
     func charts(now: Date) throws -> Charts {
@@ -112,6 +129,7 @@ extension Store {
 
     func stats(now: Date) throws -> Stats {
         let weekStart = iso(now - Self.week)
+        let ages = try songAges(since: now - Self.week, now: now)
         let figures = try db.query(
             """
             WITH \(Self.charted), week AS (SELECT * FROM charted WHERE played_at >= ?),
@@ -145,7 +163,7 @@ extension Store {
             var stats = StationStats(
                 stationID: station.id, name: station.name, plays: plays,
                 playsPerDay: Double(plays) / max(now.timeIntervalSince(logged) / 86_400, 1),
-                songs: songs, onlyHere: Int(row?.int("only_here") ?? 0)
+                songs: songs, onlyHere: Int(row?.int("only_here") ?? 0), ages: ages[station.id]
             )
             if let top = tops.first(where: { $0.int("station_id") == station.id }) {
                 let song = Self.chartSong(top)
@@ -188,16 +206,19 @@ extension Store {
             """,
             [.text(weekStart)]
         ).map { ArtistPlays(artist: $0.string("artist")!, plays: Int($0.int("plays")!), songs: Int($0.int("songs")!)) }
+        let releases = try newReleases(now: now)
         return Stats(
             stations: stations, rising: rising,
             widest: try withStations(widest.map { ($0.string("song_key")!, Self.chartSong($0)) }, since: now - Self.week),
-            artists: artists
+            artists: artists, ages: ages[.none], decades: Decades(now: now).labels,
+            newReleases: releases.songs, newReleaseCounts: releases.stations,
+            deepCuts: try deepCuts(since: now - Self.week), shared: try sharedSongs(since: now - Self.week)
         )
     }
 
     /// The songs with each station's plays of them since `since`, most
     /// first, or since logging began.
-    private func withStations(_ songs: [(key: String, song: ChartSong)], since: Date?) throws -> [ChartSong] {
+    func withStations(_ songs: [(key: String, song: ChartSong)], since: Date?) throws -> [ChartSong] {
         guard !songs.isEmpty else { return [] }
         var stations: [String: [StationPlays]] = [:]
         let keys = Set(songs.map(\.key))
@@ -221,11 +242,12 @@ extension Store {
         }
     }
 
-    private static func chartSong(_ row: Row) -> ChartSong {
+    static func chartSong(_ row: Row) -> ChartSong {
         ChartSong(
             artist: row.string("artist")!, title: row.string("title")!, url: row.string("url"),
             plays: Int(row.int("plays")!), latestPlay: parseISODate(row.string("latest_played")!)!,
-            latestStationID: row.int("station_id")!, latestStation: row.string("station")!
+            latestStationID: row.int("station_id")!, latestStation: row.string("station")!,
+            releaseDate: row.string("released")
         )
     }
 }
