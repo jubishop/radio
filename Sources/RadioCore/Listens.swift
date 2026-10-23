@@ -7,12 +7,12 @@ struct Listens: Equatable {
     var plays: Int
     var skips: Int
 
-    /// What decides which song leaves "Radio" first. The user chose to count
-    /// skips as plays on 2026-10-20.
+    /// What decides which song leaves "Radio (Unplayed)" first. The user
+    /// chose to count skips as plays on 2026-10-20.
     var total: Int { plays + skips }
 }
 
-/// A song in "Radio (New)" or one a station played that could enter it.
+/// A song in "Radio (Unplayed)" or one a station played that could enter it.
 struct UnheardContender {
     var catalogID: String
     /// The song's latest play on any station, as stored, which sorts in
@@ -20,8 +20,8 @@ struct UnheardContender {
     var latestPlay: String
     var listens: Int
 
-    /// True when this song leaves a full "Radio (New)" before `other`: the
-    /// one the user played and skipped most, then the one the stations
+    /// True when this song leaves a full "Radio (Unplayed)" before `other`:
+    /// the one the user played and skipped most, then the one the stations
     /// played least recently.
     func dropsBefore(_ other: UnheardContender) -> Bool {
         if listens != other.listens { return listens > other.listens }
@@ -30,14 +30,15 @@ struct UnheardContender {
     }
 }
 
-/// Chooses the songs in "Radio (New)". A song entering it when it's full
+/// Chooses the songs in "Radio (Unplayed)". A song entering it when it's full
 /// pushes out the song the user played and skipped most in Music, the least
 /// recently played among ties, and a song the user played more than every
 /// song there stays out. That applies to new songs, songs already in the
 /// library, and songs a station plays again after they left. Radio
 /// remembers its choices, so a song that left or stayed out comes back into
 /// contention only when a station plays it again. "Radio" and "Radio
-/// Archive" keep the most recently played songs.
+/// Archive" keep the most recently played songs, and "Radio (New)" the
+/// newest releases.
 extension Radio {
     /// Records the user's plays and skips of each matched song from
     /// Music.app. After a failure, they stay as last read, and the rest of
@@ -71,8 +72,8 @@ extension Radio {
     }
 
     /// Lets each song a station played since Radio last chose contend for
-    /// "Radio (New)", in play order. The first time, it chooses the most
-    /// recently played songs, which "Radio" holds.
+    /// "Radio (Unplayed)", in play order. The first time, it chooses the
+    /// most recently played songs, which "Radio" holds.
     func chooseUnheardSongs() throws {
         if try !store.hasUnheardChoices() { try store.seedUnheardChoices(limit: playlistLimit) }
         try store.unchooseUnmatchedSongs()
@@ -99,8 +100,8 @@ extension Radio {
         }
     }
 
-    /// The song the next new one would push out of "Radio (New)", once it's
-    /// full.
+    /// The song the next new one would push out of "Radio (Unplayed)", once
+    /// it's full.
     func nextToDropFromUnheard() throws -> String? {
         let chosen = try store.unheardContenders().chosen
         guard chosen.count >= playlistLimit else { return nil }
@@ -156,7 +157,7 @@ extension Store {
         )
     }
 
-    /// Songs sent back to review leave "Radio (New)" as of their latest
+    /// Songs sent back to review leave "Radio (Unplayed)" as of their latest
     /// play, so matching one again doesn't bring it back without a new play.
     func unchooseUnmatchedSongs() throws {
         try db.execute(
@@ -169,7 +170,7 @@ extension Store {
         )
     }
 
-    /// The songs Radio chose for "Radio (New)", and the songs a station
+    /// The songs Radio chose for "Radio (Unplayed)", and the songs a station
     /// played since Radio last passed them over, in play order.
     func unheardContenders() throws -> (chosen: [UnheardContender], newcomers: [UnheardContender]) {
         var chosen: [UnheardContender] = []

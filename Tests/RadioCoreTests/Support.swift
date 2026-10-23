@@ -46,6 +46,13 @@ func executeSQL(_ statements: [String], in home: RadioHome) {
     }
 }
 
+/// Takes a test database back from schema 12 to schema 11, which had no
+/// release dates or "Radio (New)" of the newest releases.
+let undoSchemaTwelve = [
+    "DROP TABLE release_dates", "DELETE FROM playlist_tracks WHERE playlist = 'newest'",
+    "DELETE FROM playlists WHERE kind = 'newest'", "DELETE FROM meta WHERE key = 'playlist.rename'",
+]
+
 func json(_ object: Any, status: Int = 200) -> HTTPResponse {
     HTTPResponse(status: status, body: try! JSONSerialization.data(withJSONObject: object))
 }
@@ -240,6 +247,8 @@ final class FakeAppleMusic: Sendable {
         var listens: [String: (plays: Int, skips: Int)] = [:]
     }
     private let catalog = Mutex<[CatalogSong]>([])
+    /// Release dates by catalog song, for songs given one.
+    private let releaseDates = Mutex<[String: String]>([:])
     private let state = Mutex(State())
     private let userStatus = Mutex(200)
 
@@ -252,17 +261,17 @@ final class FakeAppleMusic: Sendable {
                 let text = "\(song.artistName) \(song.name)".lowercased()
                 return words.allSatisfy { text.contains($0) }
             }
-            return json(["results": ["songs": ["data": results.map(Self.resource)]]])
+            return json(["results": ["songs": ["data": results.map(resource)]]])
         }
         http.on("GET https://api.music.apple.com/v1/catalog/us/songs/") { [self] request in
             let id = request.url.lastPathComponent
             guard let song = catalog.withLock({ $0.first { $0.id == id } }) else { return json(["data": []], status: 404) }
-            return json(["data": [Self.resource(song)]])
+            return json(["data": [resource(song)]])
         }
         http.on("GET https://api.music.apple.com/v1/catalog/us/songs?") { [self] request in
             let ids = Set((URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first { $0.name == "ids" }?.value ?? "").split(separator: ",").map(String.init))
-            return json(["data": catalog.withLock { $0 }.filter { ids.contains($0.id) }.map(Self.resource)])
+            return json(["data": catalog.withLock { $0 }.filter { ids.contains($0.id) }.map(resource)])
         }
         http.on("GET https://api.music.apple.com/v1/me/storefront") { [self] _ in
             let status = userStatus.withLock { $0 }
@@ -304,8 +313,8 @@ final class FakeAppleMusic: Sendable {
     /// Each song gets its own ISRC and a length seven seconds from the last
     /// one's, so it's a separate recording unless the test says otherwise.
     func addToCatalog(_ artist: String, _ title: String, album: String = "Album", explicit: Bool = false,
-                      isrc: String? = nil, seconds: Int? = nil) -> CatalogSong {
-        catalog.withLock { catalog in
+                      isrc: String? = nil, seconds: Int? = nil, released: String? = nil) -> CatalogSong {
+        let song = catalog.withLock { catalog in
             let id = 1_000_000 + catalog.count
             let song = CatalogSong(
                 id: String(id), name: title, artistName: artist, albumName: album,
@@ -315,6 +324,8 @@ final class FakeAppleMusic: Sendable {
             catalog.append(song)
             return song
         }
+        if let released { releaseDates.withLock { $0[song.id] = released } }
+        return song
     }
 
     /// Apple's copy of the playlists, by name, with song titles in order.
@@ -471,6 +482,10 @@ final class FakeAppleMusic: Sendable {
                 let current = state.comments[track] ?? ""
                 if current.isEmpty || current.hasPrefix(mark) { state.comments[track] = text }
                 return .commented(playlistID: musicID)
+            case .rename:
+                state.mac.playlists[id]!.name = target.name
+                state.edited.insert(id)
+                return .renamed(playlistID: musicID)
             }
             state.edited.insert(id)
             return action == .remove ? .removed(playlistID: musicID) : .placed(playlistID: musicID)
@@ -481,12 +496,14 @@ final class FakeAppleMusic: Sendable {
         userStatus.withLock { $0 = status }
     }
 
-    private static func resource(_ song: CatalogSong) -> [String: Any] {
-        ["id": song.id, "type": "songs", "attributes": [
+    private func resource(_ song: CatalogSong) -> [String: Any] {
+        var attributes: [String: Any] = [
             "name": song.name, "artistName": song.artistName, "albumName": song.albumName,
             "url": song.url, "contentRating": song.isExplicit ? "explicit" : "clean",
             "isrc": song.isrc ?? "", "durationInMillis": song.durationMillis ?? 0,
-        ]]
+        ]
+        attributes["releaseDate"] = releaseDates.withLock { $0[song.id] }
+        return ["id": song.id, "type": "songs", "attributes": attributes]
     }
 }
 

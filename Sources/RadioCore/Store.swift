@@ -40,8 +40,10 @@ struct Playlist {
     enum Kind: String, CaseIterable {
         /// "Radio": the most recently played songs.
         case recent
-        /// "Radio (New)": recently played songs the user hasn't played much
-        /// (see Listens.swift).
+        /// "Radio (New)": the newest releases the stations played.
+        case newest
+        /// "Radio (Unplayed)": recently played songs the user hasn't played
+        /// much (see Listens.swift). It was "Radio (New)" until 2026-10-22.
         case unheard
         /// "Radio Archive": many more of the most recently played.
         case archive
@@ -86,8 +88,10 @@ struct PlaylistEntry {
     /// The comment Radio last gave the song in Music.app.
     var comment: String?
     var listens: Listens
+    /// As Apple gives it, such as "2026-10-02"; nil when Apple has none.
+    var releaseDate: String?
     /// True for the song the next new one will push out of a full
-    /// "Radio (New)".
+    /// "Radio (New)" or "Radio (Unplayed)".
     var dropsNext = false
 
     var latestPlay: Date? { stations.first?.latestPlay }
@@ -184,7 +188,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 11
+    private static let schemaVersion: Int64 = 12
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -203,6 +207,7 @@ final class Store {
             if version < 9 { try migrateToSchemaNine() }
             if version < 10 { try migrateToSchemaTen() }
             if version < 11 { try migrateToSchemaEleven() }
+            if version < 12 { try migrateToSchemaTwelve() }
         }
     }
 
@@ -425,13 +430,35 @@ final class Store {
     }
 
     /// Schema 11 adds "Radio (New)", which the user split from "Radio" on
-    /// 2026-10-20. Radio's choices, made for "Radio", fill it, and "Radio"
-    /// goes back to the most recently played songs.
+    /// 2026-10-20, and which schema 12 renames "Radio (Unplayed)". Radio's
+    /// choices, made for "Radio", fill it, and "Radio" goes back to the most
+    /// recently played songs.
     private func migrateToSchemaEleven() throws {
         try db.execute("ALTER TABLE radio_choices RENAME TO unheard_choices")
         try db.execute("INSERT INTO playlists (kind) VALUES ('unheard')")
         try db.execute("PRAGMA user_version = 11")
     }
+
+    /// Schema 12 adds a "Radio (New)" of the newest releases, which the user
+    /// asked for on 2026-10-22, and keeps each song's release date, or an
+    /// empty one when Apple has none. The playlist that had the name becomes
+    /// "Radio (Unplayed)"; Music.app renames it on the next sync, before the
+    /// new playlist is looked up by name.
+    private func migrateToSchemaTwelve() throws {
+        try db.execute("CREATE TABLE release_dates (catalog_id TEXT PRIMARY KEY, released TEXT NOT NULL)")
+        try db.execute("INSERT INTO playlists (kind) VALUES ('newest')")
+        try db.execute(
+            """
+            INSERT INTO meta (key, value)
+            SELECT '\(Self.renameKey)', kind FROM playlists WHERE kind = 'unheard' AND music_id IS NOT NULL
+            """
+        )
+        try db.execute("PRAGMA user_version = 12")
+    }
+
+    /// The playlist Music.app must rename before the next sync changes any,
+    /// by its kind.
+    static let renameKey = "playlist.rename"
 
     // MARK: Stations
 
@@ -791,20 +818,62 @@ final class Store {
     }
 
     /// The matched songs a playlist holds, played most recently on any
-    /// station, up to the bound limit. "Radio (New)" holds only the songs
-    /// Radio chose for it (see Listens.swift). SQLite takes the bare columns
-    /// from the row that has the MAX, so each song's station is the one
-    /// that played it last.
+    /// station, up to the bound limit. "Radio (New)" holds the newest
+    /// releases instead, and "Radio (Unplayed)" only the songs Radio chose
+    /// for it (see Listens.swift). SQLite takes the bare columns from the
+    /// row that has the MAX, so each song's station is the one that played
+    /// it last.
     private static func recentSongs(_ kind: Playlist.Kind) -> String {
         let chosen = kind == .unheard ? " AND s.catalog_id IN (SELECT catalog_id FROM unheard_choices WHERE chosen = 1)" : ""
+        // A song without a date sorts as the oldest, and a year alone
+        // before every day of that year.
+        let newest = kind == .newest ? "released DESC, " : ""
         return """
             recent AS (
-                SELECT s.id AS song_id, s.catalog_id, p.station_id, MAX(p.played_at) AS latest_played
+                SELECT s.id AS song_id, s.catalog_id, p.station_id, MAX(p.played_at) AS latest_played,
+                    COALESCE(r.released, '') AS released
                 FROM plays p JOIN songs s ON s.id = p.song_id
+                LEFT JOIN release_dates r ON r.catalog_id = s.catalog_id
                 WHERE s.status = 'matched'\(chosen)
-                GROUP BY s.catalog_id ORDER BY latest_played DESC, s.catalog_id DESC LIMIT ?
+                GROUP BY s.catalog_id ORDER BY \(newest)latest_played DESC, s.catalog_id DESC LIMIT ?
             )
             """
+    }
+
+    /// The song a newer release would push out of "Radio (New)", once the
+    /// stations have played enough songs to fill it.
+    func nextToDropFromNewest(limit: Int) throws -> String? {
+        let rows = try db.query(
+            "WITH \(Self.recentSongs(.newest)) SELECT catalog_id FROM recent ORDER BY released, latest_played, catalog_id",
+            [.integer(Int64(limit))]
+        )
+        return rows.count >= limit ? rows.first?.string("catalog_id") : nil
+    }
+
+    /// Matched songs whose release date Radio hasn't looked up.
+    func catalogIDsMissingReleaseDates() throws -> [String] {
+        try db.query(
+            """
+            SELECT DISTINCT catalog_id FROM songs
+            WHERE status = 'matched' AND catalog_id IS NOT NULL
+                AND catalog_id NOT IN (SELECT catalog_id FROM release_dates)
+            """
+        ).compactMap { $0.string("catalog_id") }
+    }
+
+    /// Records release dates by catalog song, empty when Apple has none.
+    func recordReleaseDates(_ dates: [String: String]) throws {
+        try db.transaction {
+            for (catalogID, released) in dates {
+                try db.execute(
+                    """
+                    INSERT INTO release_dates (catalog_id, released) VALUES (?, ?)
+                    ON CONFLICT (catalog_id) DO UPDATE SET released = excluded.released
+                    """,
+                    [.text(catalogID), .text(released)]
+                )
+            }
+        }
     }
 
     /// Songs to place at the end of a playlist, in the order of their latest
@@ -929,10 +998,11 @@ final class Store {
         return try db.query(
             """
             SELECT t.catalog_id, s.artist, s.title, s.catalog_name, s.catalog_artist, s.catalog_album, s.catalog_url,
-                c.text AS comment, x.plays, x.skips
+                c.text AS comment, x.plays, x.skips, r.released
             FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
             LEFT JOIN music_comments c ON c.catalog_id = t.catalog_id
             LEFT JOIN listens x ON x.catalog_id = t.catalog_id
+            LEFT JOIN release_dates r ON r.catalog_id = t.catalog_id
             WHERE t.playlist = ? ORDER BY t.position_played_at, t.rowid
             """,
             [.text(kind.rawValue)]
@@ -942,7 +1012,8 @@ final class Store {
                 catalogID: catalogID, artist: row.string("catalog_artist") ?? row.string("artist")!,
                 title: row.string("catalog_name") ?? row.string("title")!, url: row.string("catalog_url"),
                 stations: stations[catalogID] ?? [], song: Self.musicAppSong(row), comment: row.string("comment"),
-                listens: Listens(plays: Int(row.int("plays") ?? 0), skips: Int(row.int("skips") ?? 0))
+                listens: Listens(plays: Int(row.int("plays") ?? 0), skips: Int(row.int("skips") ?? 0)),
+                releaseDate: row.string("released").flatMap { $0.isEmpty ? nil : $0 }
             )
         }
     }

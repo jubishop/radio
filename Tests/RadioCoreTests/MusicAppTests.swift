@@ -4,12 +4,13 @@ import SQLite3
 import Testing
 
 @Suite struct MusicAppTests {
-    func harnessWithSongs(_ titles: [String], playlistLimit: Int = 100, archiveLimit: Int = 10_000) async throws -> Harness {
+    func harnessWithSongs(_ titles: [String], released: [String: String] = [:], playlistLimit: Int = 100,
+                          archiveLimit: Int = 10_000) async throws -> Harness {
         let harness = try Harness(playlistLimit: playlistLimit, archiveLimit: archiveLimit)
         try await harness.signIn()
         _ = try await harness.radio.addStation(slug: "alt1021rva")
         for (index, title) in titles.enumerated() {
-            harness.music.addToCatalog("Band", title)
+            harness.music.addToCatalog("Band", title, released: released[title])
             harness.play("Band", title, minutesAgo: Double(titles.count - index))
         }
         _ = try await harness.radio.run()
@@ -56,9 +57,9 @@ import Testing
 
     /// The user asked on 2026-10-20 for a new song to push the song they've
     /// played and skipped most out of a playlist, then for that playlist to
-    /// be "Radio (New)", beside a "Radio" that drops the least recently
+    /// be "Radio (Unplayed)", beside a "Radio" that drops the least recently
     /// played, like the archive.
-    @Test func aNewSongPushesOutTheSongYouPlayedAndSkippedMostFromRadioNew() async throws {
+    @Test func aNewSongPushesOutTheSongYouPlayedAndSkippedMostFromRadioUnplayed() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
         harness.music.setListens("A", plays: 2)
         harness.music.setListens("B", plays: 1, skips: 2)
@@ -67,9 +68,10 @@ import Testing
         harness.play("Band", "D")
         let (_, sync) = try await harness.radio.run()
         #expect(harness.music.playlists() == [
-            "Radio": ["B", "C", "D"], "Radio (New)": ["A", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
+            "Radio": ["B", "C", "D"], "Radio (New)": ["B", "C", "D"],
+            "Radio (Unplayed)": ["A", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
         ])
-        #expect(sync.playlists["Radio (New)"]?.dropped == 1)
+        #expect(sync.playlists["Radio (Unplayed)"]?.dropped == 1)
         #expect(sync.playlists["Radio"]?.dropped == 1)
     }
 
@@ -81,20 +83,21 @@ import Testing
         harness.clock.advance(hours: 1)
         harness.play("Band", "D")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists()["Radio (New)"] == ["B", "C", "D"])
+        #expect(harness.music.playlists()["Radio (Unplayed)"] == ["B", "C", "D"])
     }
 
-    /// A song stays out of a full "Radio (New)" when you've played it more
+    /// A song stays out of a full "Radio (Unplayed)" when you've played it more
     /// than every song there, so it can't bounce in and out on each sync. It
     /// gets in once a song there passes it.
-    @Test func aReplayedSongYouPlayedMostStaysOutOfRadioNew() async throws {
+    @Test func aReplayedSongYouPlayedMostStaysOutOfRadioUnplayed() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 3)
         harness.music.setListens("A", plays: 5)
         harness.clock.advance(hours: 1)
         harness.play("Band", "A")
         _ = try await harness.radio.run()
         #expect(harness.music.playlists() == [
-            "Radio": ["C", "D", "A"], "Radio (New)": ["B", "C", "D"], "Radio Archive": ["B", "C", "D", "A"],
+            "Radio": ["C", "D", "A"], "Radio (New)": ["C", "D", "A"],
+            "Radio (Unplayed)": ["B", "C", "D"], "Radio Archive": ["B", "C", "D", "A"],
         ])
 
         let calls = harness.musicApp.calls
@@ -106,10 +109,10 @@ import Testing
         harness.clock.advance(hours: 1)
         harness.play("Band", "A")
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists()["Radio (New)"] == ["B", "D", "A"])
+        #expect(harness.music.playlists()["Radio (Unplayed)"] == ["B", "D", "A"])
     }
 
-    @Test func aSongAlreadyInYourLibraryThatYouPlayedMostStaysOutOfRadioNew() async throws {
+    @Test func aSongAlreadyInYourLibraryThatYouPlayedMostStaysOutOfRadioUnplayed() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
         harness.music.addToCatalog("Band", "D")
         harness.music.addToLibrary("D")
@@ -118,42 +121,44 @@ import Testing
         harness.play("Band", "D")
         _ = try await harness.radio.run()
         #expect(harness.music.playlists() == [
-            "Radio": ["B", "C", "D"], "Radio (New)": ["A", "B", "C"], "Radio Archive": ["A", "B", "C", "D"],
+            "Radio": ["B", "C", "D"], "Radio (New)": ["B", "C", "D"],
+            "Radio (Unplayed)": ["A", "B", "C"], "Radio Archive": ["A", "B", "C", "D"],
         ])
     }
 
-    /// Playing the songs in "Radio (New)" doesn't bring back one it dropped;
+    /// Playing the songs in "Radio (Unplayed)" doesn't bring back one it dropped;
     /// only a station playing that song again does.
     @Test func aDroppedSongReturnsOnlyWhenAStationPlaysItAgain() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 3)
         for title in ["B", "C", "D"] { harness.music.setListens(title, plays: 3) }
         harness.clock.advance(hours: 1)
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists()["Radio (New)"] == ["B", "C", "D"])
+        #expect(harness.music.playlists()["Radio (Unplayed)"] == ["B", "C", "D"])
     }
 
-    /// The first choices for "Radio (New)" are the songs "Radio" held, the
+    /// The first choices for "Radio (Unplayed)" are the songs "Radio" held, the
     /// most recently played; your plays decide only what later songs push
     /// out.
-    @Test func radioNewStartsWithTheMostRecentlyPlayedSongs() async throws {
+    @Test func radioUnplayedStartsWithTheMostRecentlyPlayedSongs() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 3)
         executeSQL(["DELETE FROM unheard_choices"], in: harness.home)
         harness.music.setListens("B", plays: 9)
         harness.clock.advance(hours: 1)
         _ = try await harness.radio.run()
-        #expect(harness.music.playlists()["Radio (New)"] == ["B", "C", "D"])
+        #expect(harness.music.playlists()["Radio (Unplayed)"] == ["B", "C", "D"])
     }
 
     /// When the user split the playlists on 2026-10-20, the playlist that
     /// had been "Radio" kept its name and went back to the most recently
-    /// played songs, and "Radio (New)" started with the songs Radio had
+    /// played songs, and "Radio (Unplayed)" started with the songs Radio had
     /// chosen for it.
-    @Test func upgradingKeepsRadioAndStartsRadioNewWithItsChoices() async throws {
+    @Test func upgradingKeepsRadioAndStartsRadioUnplayedWithItsChoices() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 3)
-        // Schema 10 had no "Radio (New)". Its choices, A, C, and D, were
-        // for "Radio".
+        // Schema 10 had no "Radio (Unplayed)", then named "Radio (New)", or
+        // today's "Radio (New)". Its choices, A, C, and D, were for "Radio".
+        harness.music.deletePlaylist("Radio (Unplayed)")
         harness.music.deletePlaylist("Radio (New)")
-        executeSQL([
+        executeSQL(undoSchemaTwelve + [
             "DELETE FROM playlist_tracks WHERE playlist = 'unheard'", "DELETE FROM playlists WHERE kind = 'unheard'",
             "ALTER TABLE unheard_choices RENAME TO radio_choices",
             "UPDATE radio_choices SET chosen = catalog_id IN (SELECT catalog_id FROM songs WHERE title IN ('A', 'C', 'D'))",
@@ -170,7 +175,101 @@ import Testing
         _ = try await upgraded.run()
 
         #expect(harness.music.playlists() == [
-            "Radio": ["B", "C", "D"], "Radio (New)": ["A", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
+            "Radio": ["B", "C", "D"], "Radio (New)": ["B", "C", "D"],
+            "Radio (Unplayed)": ["A", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
+        ])
+    }
+
+    /// The user asked on 2026-10-22 for a "Radio (New)" in which a new song
+    /// pushes out the oldest release, and renamed the playlist that had the
+    /// name "Radio (Unplayed)".
+    @Test func aNewerReleasePushesTheOldestOneOutOfRadioNew() async throws {
+        let harness = try await harnessWithSongs(
+            ["A", "B", "C"], released: ["A": "2026-01-09", "B": "1991-09-10", "C": "2025-06-01"], playlistLimit: 3
+        )
+        harness.music.addToCatalog("Band", "D", released: "2024-02-02")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        let (_, sync) = try await harness.radio.run()
+        #expect(harness.music.playlists() == [
+            "Radio": ["B", "C", "D"], "Radio (New)": ["A", "C", "D"], "Radio (Unplayed)": ["B", "C", "D"],
+            "Radio Archive": ["A", "B", "C", "D"],
+        ])
+        #expect(sync.playlists["Radio (New)"]?.dropped == 1)
+        #expect(try await harness.radio.status().newCount == 3)
+    }
+
+    /// A release older than every song in a full "Radio (New)" stays out.
+    /// A year without a day counts from the start of that year.
+    @Test func anOlderReleaseStaysOutOfAFullRadioNew() async throws {
+        let harness = try await harnessWithSongs(
+            ["A", "B", "C"], released: ["A": "2026-03-01", "B": "1979-06-01", "C": "2026-02-20"], playlistLimit: 3
+        )
+        harness.music.addToCatalog("Band", "D", released: "1979")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        let (_, sync) = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio (New)"] == ["A", "B", "C"])
+        #expect(sync.playlists["Radio (New)"]?.added == 0)
+    }
+
+    /// A song Apple gives no release date leaves first, then, among songs
+    /// released the same day, the one the stations played longest ago.
+    @Test func amongSongsReleasedTheSameDayTheLeastRecentlyPlayedOneDrops() async throws {
+        let harness = try await harnessWithSongs(
+            ["B", "C", "A"], released: ["B": "2026-10-02", "C": "2026-10-02"], playlistLimit: 3
+        )
+        harness.music.addToCatalog("Band", "D", released: "2026-10-02")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio (New)"] == ["B", "C", "D"])
+
+        harness.music.addToCatalog("Band", "E", released: "2026-10-02")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "E")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio (New)"] == ["C", "D", "E"])
+    }
+
+    /// The first sync fills "Radio (New)" with the newest releases the
+    /// stations have played, in play order.
+    @Test func radioNewStartsWithTheNewestReleasesTheStationsPlayed() async throws {
+        let harness = try await harnessWithSongs(
+            ["A", "B", "C", "D", "E"],
+            released: ["A": "2026-05-01", "B": "2001-01-01", "C": "2025-08-15", "D": "1999-12-31", "E": "2024-04-04"],
+            playlistLimit: 3
+        )
+        #expect(harness.music.playlists()["Radio (New)"] == ["A", "C", "E"])
+        #expect(harness.music.playlists()["Radio"] == ["C", "D", "E"])
+    }
+
+    /// Upgrading renames the playlist that was "Radio (New)" in place, so it
+    /// keeps its songs and its place in Music, before making the new
+    /// "Radio (New)", which finds the release dates of songs matched before.
+    @Test func upgradingRenamesRadioNewToRadioUnplayedAndMakesANewRadioNew() async throws {
+        let harness = try await harnessWithSongs(
+            ["A", "B", "C", "D"],
+            released: ["A": "2026-01-01", "B": "1999-01-01", "C": "2025-01-01", "D": "2001-01-01"], playlistLimit: 3
+        )
+        // Schema 11's "Radio (New)" is today's "Radio (Unplayed)".
+        harness.music.deletePlaylist("Radio (New)")
+        harness.music.renamePlaylist("Radio (Unplayed)", to: "Radio (New)")
+        executeSQL(undoSchemaTwelve + ["PRAGMA user_version = 11"], in: harness.home)
+        let clock = harness.clock
+        let upgraded = try Radio(
+            home: harness.home, http: harness.http, sources: [AudacySource(http: harness.http)],
+            notifier: PushoverNotifier(http: harness.http, userKey: nil, apiKey: nil), musicApp: harness.musicApp,
+            playlistLimit: 3, now: { clock.now }
+        )
+        harness.clock.advance(hours: 0.25)
+
+        _ = try await upgraded.run()
+
+        #expect(harness.music.playlistNames() == ["Radio", "Radio (Unplayed)", "Radio Archive", "Radio (New)"])
+        #expect(harness.music.playlists() == [
+            "Radio": ["B", "C", "D"], "Radio (New)": ["A", "C", "D"], "Radio (Unplayed)": ["B", "C", "D"],
+            "Radio Archive": ["A", "B", "C", "D"],
         ])
     }
 
@@ -222,7 +321,8 @@ import Testing
         harness.music.syncMusicApp()
 
         #expect(harness.music.playlists() == [
-            "Radio": ["B", "C", "D"], "Radio (New)": ["B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
+            "Radio": ["B", "C", "D"], "Radio (New)": ["B", "C", "D"],
+            "Radio (Unplayed)": ["B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
         ])
         #expect(try await harness.radio.status().playlistCount == 3)
     }
@@ -234,7 +334,8 @@ import Testing
         harness.play("Band", "D")
         _ = try await harness.radio.run()
         #expect(harness.music.playlists() == [
-            "Radio": ["B", "C", "D"], "Radio (New)": ["B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
+            "Radio": ["B", "C", "D"], "Radio (New)": ["B", "C", "D"],
+            "Radio (Unplayed)": ["B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
         ])
 
         // A returns to Radio and moves to the end of the archive.
@@ -242,7 +343,8 @@ import Testing
         harness.play("Band", "A")
         let (_, sync) = try await harness.radio.run()
         #expect(harness.music.playlists() == [
-            "Radio": ["C", "D", "A"], "Radio (New)": ["C", "D", "A"], "Radio Archive": ["B", "C", "D", "A"],
+            "Radio": ["C", "D", "A"], "Radio (New)": ["C", "D", "A"],
+            "Radio (Unplayed)": ["C", "D", "A"], "Radio Archive": ["B", "C", "D", "A"],
         ])
         #expect(sync.playlists["Radio Archive"]?.moved == 1)
         let status = try await harness.radio.status()
@@ -251,13 +353,19 @@ import Testing
 
     @Test func theArchiveDropsTheLeastRecentlyPlayedSongsPastItsLimit() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C", "D"], playlistLimit: 2, archiveLimit: 3)
-        #expect(harness.music.playlists() == ["Radio": ["C", "D"], "Radio (New)": ["C", "D"], "Radio Archive": ["B", "C", "D"]])
+        #expect(harness.music.playlists() == [
+            "Radio": ["C", "D"], "Radio (New)": ["C", "D"],
+            "Radio (Unplayed)": ["C", "D"], "Radio Archive": ["B", "C", "D"],
+        ])
 
         harness.music.addToCatalog("Band", "E")
         harness.clock.advance(hours: 1)
         harness.play("Band", "E")
         let (_, sync) = try await harness.radio.run()
-        #expect(harness.music.playlists() == ["Radio": ["D", "E"], "Radio (New)": ["D", "E"], "Radio Archive": ["C", "D", "E"]])
+        #expect(harness.music.playlists() == [
+            "Radio": ["D", "E"], "Radio (New)": ["D", "E"],
+            "Radio (Unplayed)": ["D", "E"], "Radio Archive": ["C", "D", "E"],
+        ])
         #expect(sync.playlists["Radio Archive"]?.dropped == 1)
     }
 
@@ -274,7 +382,8 @@ import Testing
     @Test func aBacklogAddsOnlyTheMostRecentlyPlayedSongs() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C", "D", "E"], playlistLimit: 3)
         #expect(harness.music.playlists() == [
-            "Radio": ["C", "D", "E"], "Radio (New)": ["C", "D", "E"], "Radio Archive": ["A", "B", "C", "D", "E"],
+            "Radio": ["C", "D", "E"], "Radio (New)": ["C", "D", "E"],
+            "Radio (Unplayed)": ["C", "D", "E"], "Radio Archive": ["A", "B", "C", "D", "E"],
         ])
     }
 
@@ -554,6 +663,7 @@ import Testing
             "Alt 102.1": ["Dog Days Are Over (Mixed)", "Savior", "Numb"],
             "Radio": ["Dog Days Are Over", "Numb", "Savior"],
             "Radio (New)": ["Dog Days Are Over", "Numb", "Savior"],
+            "Radio (Unplayed)": ["Dog Days Are Over", "Numb", "Savior"],
             "Radio Archive": ["Dog Days Are Over", "Numb", "Savior"],
         ])
         #expect(try await upgraded.status().playlistCount == 3)
@@ -595,9 +705,10 @@ import Testing
 
         _ = try await upgraded.sync()
 
-        #expect(harness.music.playlistNames() == ["Radio", "Radio (New)", "Radio Archive"])
+        #expect(harness.music.playlistNames() == ["Radio", "Radio (New)", "Radio (Unplayed)", "Radio Archive"])
         #expect(harness.music.playlists() == [
-            "Radio": ["Savior", "Numb"], "Radio (New)": ["Savior", "Numb"], "Radio Archive": ["Savior", "Numb"],
+            "Radio": ["Savior", "Numb"], "Radio (New)": ["Savior", "Numb"],
+            "Radio (Unplayed)": ["Savior", "Numb"], "Radio Archive": ["Savior", "Numb"],
         ])
         #expect(try await upgraded.status().stations.first?.recentlyAdded.map(\.title) == ["Numb", "Savior"])
     }
@@ -645,9 +756,10 @@ import Testing
 
         _ = try await upgraded.sync()
 
-        #expect(harness.music.playlistNames() == ["Radio", "Radio Archive", "Radio (New)"])
+        #expect(harness.music.playlistNames() == ["Radio", "Radio Archive", "Radio (New)", "Radio (Unplayed)"])
         #expect(harness.music.playlists() == [
-            "Radio": ["A", "B", "C", "D"], "Radio (New)": ["A", "B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
+            "Radio": ["A", "B", "C", "D"], "Radio (New)": ["A", "B", "C", "D"],
+            "Radio (Unplayed)": ["A", "B", "C", "D"], "Radio Archive": ["A", "B", "C", "D"],
         ])
         let status = try await upgraded.status()
         #expect((status.playlistCount, status.archiveCount) == (4, 4))
@@ -704,7 +816,9 @@ import Testing
 
         #expect(harness.music.comment(of: "A") == "📻 \(minute(now - 20 * 60)) · Alt 102.1")
         #expect(harness.music.comment(of: "B") == "📻 \(minute(now - 10 * 60)) · Alt 102.1")
-        #expect(harness.music.playlists() == ["Radio": ["A", "B"], "Radio (New)": ["A", "B"], "Radio Archive": ["A", "B"]])
+        #expect(harness.music.playlists() == [
+            "Radio": ["A", "B"], "Radio (New)": ["A", "B"], "Radio (Unplayed)": ["A", "B"], "Radio Archive": ["A", "B"],
+        ])
         let changes = try #require(sync.playlists["Radio"])
         #expect((changes.added, changes.moved, changes.dropped) == (0, 0, 0))
         #expect(sync.commented == 2)

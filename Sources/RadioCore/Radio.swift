@@ -63,9 +63,11 @@ public struct StationSummary: Sendable {
 
 public struct RadioStatus: Sendable {
     public var stations: [StationSummary]
-    /// Songs in "Radio", "Radio (New)", and "Radio Archive".
+    /// Songs in "Radio", "Radio (New)", "Radio (Unplayed)", and
+    /// "Radio Archive".
     public var playlistCount: Int
     public var newCount: Int
+    public var unplayedCount: Int
     public var archiveCount: Int
     public var appleMusic: AppleMusicState
     public var lastSyncAt: Date?
@@ -97,8 +99,9 @@ public actor Radio {
     let musicApp: MusicApp?
     let jev: Jev?
     let now: @Sendable () -> Date
-    /// "Radio" keeps this many of the most recently played songs, and
-    /// "Radio (New)" this many chosen by the user's plays and skips.
+    /// "Radio" keeps this many of the most recently played songs,
+    /// "Radio (New)" this many of the newest releases, and
+    /// "Radio (Unplayed)" this many chosen by the user's plays and skips.
     public nonisolated let playlistLimit: Int
     /// "Radio Archive" keeps this many.
     public nonisolated let archiveLimit: Int
@@ -504,7 +507,8 @@ public actor Radio {
         return RadioStatus(
             stations: summaries,
             playlistCount: try store.playlistCount(.recent),
-            newCount: try store.playlistCount(.unheard),
+            newCount: try store.playlistCount(.newest),
+            unplayedCount: try store.playlistCount(.unheard),
             archiveCount: try store.playlistCount(.archive),
             appleMusic: try appleMusicState(),
             lastSyncAt: try store.metaDate("sync.last_at"),
@@ -516,11 +520,16 @@ public actor Radio {
     }
 
     /// A playlist's songs, most recently played first, marking the one the
-    /// next new song will push out of "Radio (New)".
+    /// next new song will push out of "Radio (New)" or "Radio (Unplayed)".
     func playlistEntries(_ kind: Playlist.Kind) throws -> [PlaylistEntry] {
         var entries = try store.playlistEntries(kind).reversed()
             .sorted { ($0.latestPlay ?? .distantPast) > ($1.latestPlay ?? .distantPast) }
-        if kind == .unheard, let next = try nextToDropFromUnheard() {
+        let next = switch kind {
+        case .newest: try store.nextToDropFromNewest(limit: playlistLimit)
+        case .unheard: try nextToDropFromUnheard()
+        case .recent, .archive: String?.none
+        }
+        if let next {
             for index in entries.indices where entries[index].catalogID == next {
                 entries[index].dropsNext = true
             }

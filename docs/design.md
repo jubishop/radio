@@ -6,11 +6,10 @@ status: current
 
 Radio logs each song its stations play, starting with Alt 102.1 (WRXL,
 Richmond). It keeps the 100 most recently played in an Apple Music playlist
-named "Radio", 100 recently played that the user hasn't played much in
-"Radio (New)", and the 10,000 most recently played in "Radio Archive". This
-page records the
-accepted decisions, the constraints they rest on, and the questions still
-open. Feed details are in
+named "Radio", the 100 newest releases in "Radio (New)", 100 recently played
+that the user hasn't played much in "Radio (Unplayed)", and the 10,000 most
+recently played in "Radio Archive". This page records the accepted
+decisions, the constraints they rest on, and the questions still open. Feed details are in
 [Audacy now-playing feed](audacy-now-playing-feed.md),
 [iHeartRadio track history](iheart-track-history.md), and
 [Hubbard Radio listen-live cues](hubbard-listen-live-cues.md).
@@ -334,7 +333,62 @@ Music.app makes on the next sync and fills with the songs Radio had chosen
 for "Radio", one Music.app call per song. Its page, `/playlists/new`, marks
 the song that leaves next, and the dashboard links to it beside the other
 two. The dashboard's "in Radio" badges and "Just added to Radio" lists
-still follow "Radio". "Radio" and "Radio (New)" each keep 100 songs.
+still follow "Radio". "Radio" and "Radio (New)" each keep 100 songs. On
+2026-10-22 this playlist
+[became "Radio (Unplayed)"](#add-radio-new-for-the-newest-releases), and a
+new "Radio (New)" took its name.
+
+### Add "Radio (New)" for the newest releases
+
+Accepted 2026-10-22. The user asked to rename "Radio (New)" to
+"Radio (Unplayed)" and to give the name to a new playlist of 100 songs, in
+which a new song pushes out the one with the oldest release date. The
+playlists are now:
+
+- **"Radio"** keeps the 100 most recently played songs.
+- **"Radio (New)"** keeps the 100 newest releases the stations played.
+- **"Radio (Unplayed)"** is the playlist the
+  [decision above](#split-off-radio-new-for-songs-the-user-hasnt-played-much)
+  added, renamed, with the same rules.
+- **"Radio Archive"** doesn't change.
+
+A song's release date is the `releaseDate` the Apple Music API gives its
+catalog song, such as `2026-10-02`, or a year alone when that's all Apple
+knows. A song keeps its original date on reissues and compilations: checked
+on 2026-10-22 through the public iTunes Search API, "Mr. Brightside" is
+2003 on *Hot Fuss*, *Direct Hits*, and *Rebel Diamonds*, and "Smells Like
+Teen Spirit" is 1991 on the 30th-anniversary *Nevermind*. A live recording
+has its own date, but Radio avoids matching those. Radio looks up each
+matched song's date once, and records none when Apple has none.
+
+Asked whether a song should also leave once the stations stop playing it,
+the user chose the recommendation that it shouldn't, so the playlist holds
+the 100 newest releases any station has played. A new song older than every
+song there stays out, and a song that leaves can't come back, since only a
+newer release can get in. The first sync fills it from every logged play.
+The user accepted these defaults without asking for changes:
+
+- **A song with no date leaves first,** and a year alone counts as earlier
+  than every day of that year.
+- **Ties go to the least recently played** on any station, as in the other
+  playlists.
+- **It's in play order,** ending with the most recent play, like the other
+  playlists. Music.app can only append songs, so keeping release order would
+  move every newer song whenever an older one arrived. Music's Year column
+  sorts it by release.
+
+Music.app renames the old playlist through its persistent ID on the first
+sync after the upgrade, so it keeps its songs, pins, and downloads, and
+nothing else touches Music.app until that works. Otherwise Music.app would
+find that playlist by name for the new "Radio (New)". Its page moved to
+`/playlists/unplayed`, and `/playlists/new` lists the new playlist with each
+song's release date and marks the song that leaves next.
+
+A preview on 2026-10-22, against a copy of the live database with dates from
+the iTunes Search API, found a date for all 823 matched songs. The 100
+newest were all released in 2026, from "Black Stars" by The Hunger Games &
+The Smashing Pumpkins (2026-10-16) to "Fabulous" by MEEK (2026-01-30), which
+would leave first.
 
 ### Add a larger "Radio Archive" playlist
 
@@ -600,8 +654,9 @@ accepted both recommendations:
   it. Songs already in the playlists get comments on the first sync after
   the upgrade.
 - **Dashboard pages:** `/playlists/radio`, `/playlists/new` (added
-  2026-10-20), and `/playlists/archive` list each
-  playlist's songs, most recently played first, with each station's play
+  2026-10-20 and given to the newest releases on 2026-10-22),
+  `/playlists/unplayed` (since 2026-10-22), and `/playlists/archive` list
+  each playlist's songs, most recently played first, with each station's play
   count and, since 2026-10-20, the user's plays and skips. The dashboard's
   playlist counts link to them.
 
@@ -710,8 +765,9 @@ and "Radio Archive".
   keeps its entries.
 - **Dropping songs:** for each playlist, each sync first drops, through
   Music.app, every entry for a song it shouldn't hold, and then places new
-  and re-played songs. "Radio (New)" holds the songs Radio chose for it,
-  and "Radio" and the archive their limits of most recently played songs.
+  and re-played songs. "Radio (Unplayed)" holds the songs Radio chose for
+  it, "Radio (New)" its limit of the newest releases, and "Radio" and the
+  archive their limits of most recently played songs.
   An entry to drop that Music.app can't find was removed by hand, and Radio
   forgets it.
 - **Station credit:** a song added to "Radio" is credited to the station

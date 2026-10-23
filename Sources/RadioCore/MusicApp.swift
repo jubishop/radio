@@ -11,6 +11,8 @@ public enum MusicAppAction: Equatable, Sendable {
     /// the one placing would add. Keeps a comment that doesn't start with
     /// `mark`, which someone else wrote.
     case comment(String, mark: String)
+    /// Gives the playlist its name and description, without a song.
+    case rename
 }
 
 /// A playlist as Music.app finds it: by persistent ID once Radio knows it,
@@ -65,6 +67,8 @@ public enum MusicAppResult: Equatable, Sendable {
     case removed(playlistID: String)
     /// The track has the comment, or keeps one someone else wrote.
     case commented(playlistID: String)
+    /// The playlist has its name and description.
+    case renamed(playlistID: String)
     /// The playlist has no entry with that title and artist.
     case trackNotFound(playlistID: String)
     /// The library has no track for the song, perhaps because a song added
@@ -102,6 +106,7 @@ public struct ScriptedMusicApp: MusicApp {
         case .place: ("place", "", "")
         case .remove: ("remove", "", "")
         case .comment(let text, let mark): ("comment", text, mark)
+        case .rename: ("rename", "", "")
         }
         let output = try await runOSAScript(Self.script, arguments: [
             name, playlist.id ?? "", playlist.name, playlist.description, song.name, song.artist, song.album, comment, mark,
@@ -112,6 +117,7 @@ public struct ScriptedMusicApp: MusicApp {
         case "placed": return .placed(playlistID: id)
         case "removed": return .removed(playlistID: id)
         case "commented": return .commented(playlistID: id)
+        case "renamed": return .renamed(playlistID: id)
         case "no-track": return .trackNotFound(playlistID: id)
         case "not-in-library": return .notInLibrary(playlistID: id)
         case "no-playlist": return .playlistNotFound
@@ -194,8 +200,9 @@ public struct ScriptedMusicApp: MusicApp {
     }
 
     /// Finds the playlist by persistent ID, then by name, and makes it when
-    /// placing a song and there's none. Entries and library tracks are found
-    /// by title and artist. Placing deletes every entry for the song's
+    /// placing a song and there's none. Renaming sets the name of the
+    /// playlist found and changes no entries. Entries and library tracks are
+    /// found by title and artist. Placing deletes every entry for the song's
     /// library track (by its database ID) and adds the track back, which
     /// appends it; script positions follow the playlist's view sort, so they
     /// can't be used. A comment belongs to the library track, so it shows in
@@ -219,6 +226,13 @@ public struct ScriptedMusicApp: MusicApp {
                     end try
                 end if
                 set targetID to persistent ID of target
+                if action is "rename" then
+                    set name of target to playlistName
+                    try
+                        set description of target to playlistDescription
+                    end try
+                    return "renamed " & targetID
+                end if
                 set entries to (every track of target whose name is songName and artist is songArtist)
                 if action is "remove" then
                     if (count of entries) is 0 then return "no-track " & targetID

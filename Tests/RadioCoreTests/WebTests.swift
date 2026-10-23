@@ -34,6 +34,7 @@ import Testing
         #expect(page.contains("<h3>Just added to Radio</h3>"))
         #expect(page.contains(#"<a class="pill playlist" href="/playlists/radio">1 song in Radio</a>"#))
         #expect(page.contains(#"<a class="pill playlist" href="/playlists/new">1 in Radio (New)</a>"#))
+        #expect(page.contains(#"<a class="pill playlist" href="/playlists/unplayed">1 in Radio (Unplayed)</a>"#))
         #expect(page.contains(#"<a class="pill playlist" href="/playlists/archive">1 in Radio Archive</a>"#))
         #expect(page.contains(#"<a class="pill chart" href="/charts">Charts</a>"#))
         #expect(page.contains(#"<a class="pill chart" href="/stats">Stats</a>"#))
@@ -238,7 +239,7 @@ import Testing
     }
 
     /// The user asked on 2026-10-20 to see their plays and skips, and the
-    /// song the next new one will push out of "Radio (New)".
+    /// song the next new one will push out of "Radio (Unplayed)".
     @Test func thePlaylistPagesShowYourPlaysAndSkipsAndWhatDropsNext() async throws {
         let harness = try Harness(playlistLimit: 2)
         try await harness.signIn()
@@ -254,11 +255,11 @@ import Testing
         let dashboard = Dashboard(radio: harness.radio)
 
         let radio = text(await dashboard.handle(request("GET", "/playlists/radio")))
-        let new = text(await dashboard.handle(request("GET", "/playlists/new")))
+        let unplayed = text(await dashboard.handle(request("GET", "/playlists/unplayed")))
         let archive = text(await dashboard.handle(request("GET", "/playlists/archive")))
 
-        #expect(new.contains("<h1>Radio (New)</h1>"))
-        let songs = new.components(separatedBy: "<li>").dropFirst()
+        #expect(unplayed.contains("<h1>Radio (Unplayed)</h1>"))
+        let songs = unplayed.components(separatedBy: "<li>").dropFirst()
         let a = try #require(songs.first { $0.contains("Band – A") })
         let b = try #require(songs.first { $0.contains("Band – B") })
         #expect(a.contains("3 plays · 1 skip"))
@@ -269,6 +270,34 @@ import Testing
             #expect(page.contains("3 plays · 1 skip"))
             #expect(!page.contains("drops next"))
         }
+    }
+
+    /// "Radio (New)" shows each song's release date and marks the oldest
+    /// release, which a newer one will push out.
+    @Test func theRadioNewPageShowsReleaseDatesAndWhatDropsNext() async throws {
+        let harness = try Harness(playlistLimit: 2)
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Band", "A", released: "2026-10-02")
+        harness.music.addToCatalog("Band", "B", released: "1994")
+        harness.music.addToCatalog("Band", "C")
+        harness.play("Band", "A", minutesAgo: 30)
+        harness.play("Band", "B", minutesAgo: 20)
+        harness.play("Band", "C", minutesAgo: 10)
+        _ = try await harness.radio.run()
+
+        let page = text(await Dashboard(radio: harness.radio).handle(request("GET", "/playlists/new")))
+
+        #expect(page.contains("<h1>Radio (New)</h1>"))
+        #expect(page.contains("A newer release pushes out the oldest"))
+        let songs = page.components(separatedBy: "<li>").dropFirst()
+        let a = try #require(songs.first { $0.contains("Band – A") })
+        let b = try #require(songs.first { $0.contains("Band – B") })
+        #expect(!songs.contains { $0.contains("Band – C") })
+        #expect(a.contains("released 2026-10-02"))
+        #expect(!a.contains("drops next"))
+        #expect(b.contains("released 1994"))
+        #expect(b.contains(#"<span class="badge drop">drops next</span>"#))
     }
 
     @Test func theReviewPageMatchesAndIgnoresSongs() async throws {

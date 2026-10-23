@@ -130,10 +130,10 @@ import Testing
         live.isrc = nil; live.durationMillis = nil
         let oldLake = String(decoding: try JSONEncoder().encode([unplugged]), as: UTF8.self)
         let oldLive = String(decoding: try JSONEncoder().encode([live]), as: UTF8.self)
-        executeSQL([
+        executeSQL(undoSchemaTwelve + [
             "UPDATE songs SET candidates = '\(oldLake)', jev_score = 0.37 WHERE title = 'Lake Of Fire'",
             "UPDATE songs SET candidates = '\(oldLive)' WHERE title = 'Come As You Are'",
-            // Schemas 10 and 11 came later.
+            // Schemas 10 to 12 came later.
             "DROP TABLE listens", "DROP TABLE unheard_choices",
             "DELETE FROM playlist_tracks WHERE playlist = 'unheard'", "DELETE FROM playlists WHERE kind = 'unheard'",
             "PRAGMA user_version = 8",

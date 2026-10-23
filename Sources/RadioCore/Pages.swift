@@ -49,7 +49,8 @@ enum Pages {
     private static func playlists(_ status: RadioStatus) -> String {
         let songs = "\(status.playlistCount) song\(status.playlistCount == 1 ? "" : "s")"
         return "<a class=\"pill playlist\" href=\"\(path(of: .recent))\">\(songs) in \(escape(Radio.playlistName))</a>\n"
-            + "<a class=\"pill playlist\" href=\"\(path(of: .unheard))\">\(status.newCount) in \(escape(Radio.newPlaylistName))</a>\n"
+            + "<a class=\"pill playlist\" href=\"\(path(of: .newest))\">\(status.newCount) in \(escape(Radio.newPlaylistName))</a>\n"
+            + "<a class=\"pill playlist\" href=\"\(path(of: .unheard))\">\(status.unplayedCount) in \(escape(Radio.unplayedPlaylistName))</a>\n"
             + "<a class=\"pill playlist\" href=\"\(path(of: .archive))\">\(status.archiveCount) in \(escape(Radio.archivePlaylistName))</a>"
     }
 
@@ -57,19 +58,23 @@ enum Pages {
     static func path(of kind: Playlist.Kind) -> String {
         switch kind {
         case .recent: "/playlists/radio"
-        case .unheard: "/playlists/new"
+        case .newest: "/playlists/new"
+        case .unheard: "/playlists/unplayed"
         case .archive: "/playlists/archive"
         }
     }
 
     /// A playlist's songs, most recently played first, with the stations
     /// that played each one and how often, and the user's plays and skips.
-    /// "Radio (New)" marks the song the next new one will push out.
+    /// "Radio (New)" adds each song's release date, and it and
+    /// "Radio (Unplayed)" mark the song the next new one will push out.
     static func playlist(_ kind: Playlist.Kind, name: String, entries: [PlaylistEntry]) -> String {
         let count = "\(entries.count) song\(entries.count == 1 ? "" : "s")"
-        let rule = kind == .unheard
-            ? " A new song pushes out the one you've played and skipped most in Music, or among ties, the one played longest ago."
-            : ""
+        let rule = switch kind {
+        case .newest: " A newer release pushes out the oldest, or among songs released the same day, the one played longest ago."
+        case .unheard: " A new song pushes out the one you've played and skipped most in Music, or among ties, the one played longest ago."
+        case .recent, .archive: ""
+        }
         var body = """
             <header><p><a href="/">← Radio</a></p><h1>\(escape(name))</h1>
             <p class="meta">\(count), most recently played first.\(rule) Each song's comment in Music gives its latest play and each station's plays.</p></header>
@@ -82,8 +87,11 @@ enum Pages {
             for entry in entries {
                 let time = entry.latestPlay.map { "<time>\(escape(shortTime($0)))</time> " } ?? ""
                 let stations = entry.stations.map(tag).joined(separator: " ")
+                let released = kind == .newest
+                    ? " <span class=\"released\">released \(escape(entry.releaseDate ?? "date unknown"))</span>" : ""
                 let drop = entry.dropsNext ? " <span class=\"badge drop\">drops next</span>" : ""
-                body += "<li>\(time)\(link(entry.url, "\(entry.artist) – \(entry.title)")) \(stations)\(listens(entry.listens))\(drop)</li>"
+                body += "<li>\(time)\(link(entry.url, "\(entry.artist) – \(entry.title)")) \(stations)\(released)"
+                    + "\(listens(entry.listens))\(drop)</li>"
             }
             body += "</ol>"
         }
@@ -510,7 +518,7 @@ enum Pages {
         .tag { --c: var(--station); }
         .good { --c: var(--good); color: var(--c); } .bad { --c: var(--bad); color: var(--c); } .jev { --c: var(--jev); color: var(--c); }
         .you, .chart { --c: var(--link); } .playlist { --c: var(--playlist); } .waiting, .drop { --c: var(--waiting); } .by { font-weight: 600; }
-        .listens { color: var(--muted); font-size: 13px; white-space: nowrap; }
+        .listens, .released { color: var(--muted); font-size: 13px; white-space: nowrap; }
         .station { border-top: 4px solid var(--station);
           background: linear-gradient(color-mix(in srgb, var(--station) 8%, var(--card)), var(--card) 120px); }
         .station h2::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%;

@@ -8,9 +8,10 @@ struct MusicAppSession {
 }
 
 /// Keeps Radio's playlists in order of each song's latest play on any
-/// station: a few of the most recently played in "Radio", a few chosen by the
-/// user's plays and skips in "Radio (New)" (see Listens.swift), and many
-/// more of the most recently played in "Radio Archive". Music.app makes
+/// station: a few of the most recently played in "Radio", a few of the newest
+/// releases in "Radio (New)", a few chosen by the user's plays and skips in
+/// "Radio (Unplayed)" (see Listens.swift), and many more of the most
+/// recently played in "Radio Archive". Music.app makes
 /// every change to the playlists: it adds
 /// and moves songs by placing them at the end, and drops songs that fall past
 /// a playlist's limit. The web API only adds songs to the library, so
@@ -18,6 +19,7 @@ struct MusicAppSession {
 extension Radio {
     public static let playlistName = "Radio"
     public static let newPlaylistName = "Radio (New)"
+    public static let unplayedPlaylistName = "Radio (Unplayed)"
     public static let archivePlaylistName = "Radio Archive"
 
     /// How long a song added to the library through the web API may take to
@@ -28,7 +30,8 @@ extension Radio {
     func name(of kind: Playlist.Kind) -> String {
         switch kind {
         case .recent: Self.playlistName
-        case .unheard: Self.newPlaylistName
+        case .newest: Self.newPlaylistName
+        case .unheard: Self.unplayedPlaylistName
         case .archive: Self.archivePlaylistName
         }
     }
@@ -36,7 +39,7 @@ extension Radio {
     /// How many songs a playlist keeps.
     func limit(of kind: Playlist.Kind) -> Int {
         switch kind {
-        case .recent, .unheard: playlistLimit
+        case .recent, .newest, .unheard: playlistLimit
         case .archive: archiveLimit
         }
     }
@@ -49,6 +52,19 @@ extension Radio {
         for song in try await client.songs(ids: missing) {
             try store.setCatalogDetails(song)
         }
+    }
+
+    /// Records the release date of each matched song Radio hasn't looked
+    /// up, which "Radio (New)" goes by, or an empty one when Apple has none
+    /// or no longer has the song.
+    func fillReleaseDates(client: AppleMusicClient) async throws {
+        let missing = try store.catalogIDsMissingReleaseDates()
+        guard !missing.isEmpty else { return }
+        var dates = Dictionary(uniqueKeysWithValues: missing.map { ($0, "") })
+        for song in try await client.songs(ids: missing) {
+            dates[song.id] = song.releaseDate ?? ""
+        }
+        try store.recordReleaseDates(dates)
     }
 
     /// Removes automatic matches that today's matching rules reject, such as
@@ -104,13 +120,15 @@ extension Radio {
         return removed
     }
 
-    /// Syncs "Radio" and "Radio (New)" before the archive, so trouble in
-    /// the much larger archive can't hold them up. "Radio (New)" holds the
-    /// songs Radio chose by the user's plays and skips (see Listens.swift).
-    /// Without Music.app, nothing changes. Returns the changes by playlist
-    /// name.
+    /// Syncs the 100-song playlists before the archive, so trouble in the
+    /// much larger archive can't hold them up. "Radio (New)" holds the
+    /// newest releases, and "Radio (Unplayed)" the songs Radio chose by the
+    /// user's plays and skips (see Listens.swift). Without Music.app,
+    /// nothing changes. Returns the changes by playlist name.
     func syncPlaylists(client: AppleMusicClient, music: inout MusicAppSession) async throws -> [String: PlaylistChanges] {
         guard musicApp != nil else { return [:] }
+        try await renamePlaylist(music: &music)
+        try await fillReleaseDates(client: client)
         try await readListens(music: &music)
         try chooseUnheardSongs()
         var changes: [String: PlaylistChanges] = [:]
@@ -118,6 +136,20 @@ extension Radio {
             changes[name(of: kind)] = try await syncPlaylist(kind, client: client, music: &music)
         }
         return changes
+    }
+
+    /// Gives a renamed playlist its new name in Music.app, which finds it by
+    /// its ID: the "Radio (New)" that became "Radio (Unplayed)" on
+    /// 2026-10-22. Until then, Music.app would find that playlist by name
+    /// for the new "Radio (New)", so a failure stops the sync's Music.app
+    /// work.
+    private func renamePlaylist(music: inout MusicAppSession) async throws {
+        guard let kind = try store.meta(Store.renameKey).flatMap(Playlist.Kind.init(rawValue:)) else { return }
+        var playlist = try store.playlist(kind)
+        // Renaming involves no song.
+        _ = try await perform(.rename, song: MusicAppSong(name: "", artist: "", album: ""), playlist: &playlist, music: &music)
+        // Done once Music.app answers, even that the playlist was deleted.
+        if music.failure == nil { try store.setMeta(Store.renameKey, nil) }
     }
 
     /// Drops songs that more recent ones have pushed out, then places new
@@ -160,7 +192,7 @@ extension Radio {
                 // An entry whose track will apparently never reach the
                 // library stays where it is.
                 if track.inPlaylist { try store.setPosition(in: kind, catalogID: track.catalogID, playedAt: track.latestPlay) }
-            case .trackNotFound, .commented, .playlistNotFound, .ambiguousPlaylist:
+            case .trackNotFound, .commented, .renamed, .playlistNotFound, .ambiguousPlaylist:
                 return changes
             }
         }
@@ -202,7 +234,7 @@ extension Radio {
                 case .commented:
                     try store.recordComment(text, catalogID: entry.catalogID)
                     commented += 1
-                case .notInLibrary, .trackNotFound, .placed, .removed:
+                case .notInLibrary, .trackNotFound, .placed, .removed, .renamed:
                     continue
                 case .playlistNotFound, .ambiguousPlaylist:
                     break entries
@@ -235,7 +267,7 @@ extension Radio {
         case .removed, .placed, .trackNotFound, .playlistNotFound:
             try store.removePlaylistTrack(from: playlist.kind, catalogID: catalogID)
             return true
-        case .notInLibrary, .commented, .ambiguousPlaylist:
+        case .notInLibrary, .commented, .renamed, .ambiguousPlaylist:
             return false
         }
     }
@@ -250,6 +282,8 @@ extension Radio {
         let limit = limit(of: playlist.kind).formatted()
         let description = switch playlist.kind {
         case .recent, .archive: "The \(limit) songs played most recently on the stations Radio follows, most recent last."
+        case .newest: "The \(limit) newest releases played on the stations Radio follows, most recently played last. "
+            + "Each newer release pushes out the oldest."
         case .unheard: "\(limit) songs played recently on the stations Radio follows, most recent last. "
             + "Each new song pushes out the one you've played and skipped most."
         }
@@ -262,7 +296,8 @@ extension Radio {
             return nil
         }
         switch result {
-        case .placed(let id), .removed(let id), .commented(let id), .trackNotFound(let id), .notInLibrary(let id):
+        case .placed(let id), .removed(let id), .commented(let id), .renamed(let id), .trackNotFound(let id),
+             .notInLibrary(let id):
             music.succeeded = true
             guard playlist.musicID != id else { break }
             let replaced = playlist.musicID != nil

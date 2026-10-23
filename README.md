@@ -5,10 +5,11 @@ they play.
 
 Radio is a Swift command-line tool that runs on a Mac. Every 15 minutes it
 logs each followed station's plays from the station's public now-playing feed.
-Each newly heard song goes into three Apple Music playlists that every
+Each newly heard song goes into four Apple Music playlists that every
 station feeds: "Radio" keeps the 100 most recently played songs, "Radio (New)"
-keeps 100 recently played songs you haven't played much in Music, and
-"Radio Archive" keeps the 10,000 most recent. A dashboard on the home network shows recent activity, charts of
+keeps the 100 newest releases, "Radio (Unplayed)" keeps 100 recently played
+songs you haven't played much in Music, and "Radio Archive" keeps the 10,000
+most recent. A dashboard on the home network shows recent activity, charts of
 what the stations play most, and songs that need a manual match. The first station is Alt 102.1 (WRXL, Richmond).
 See [operations](docs/operations.md) to install and use it, and
 [Radio design](docs/design.md) for the decisions behind it.

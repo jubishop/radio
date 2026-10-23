@@ -44,19 +44,26 @@ six months.
 4. On the Mac mini, open <http://localhost:8102/auth> and sign in with the
    Apple ID that owns the library. Sign-in works only from the Mac mini.
 
-The next scheduled run matches songs and creates three playlists, which every
+The next scheduled run matches songs and creates four playlists, which every
 station feeds. Run `radio sync` to do it immediately.
 
 - **Radio** holds the 100 songs played most recently on any station, so
   shuffling it plays what the stations played lately. When a new song joins,
   the least recently played one leaves the playlist but stays in your
   library.
-- **Radio (New)** holds 100 songs the stations played recently that you
-  haven't played much. When a new song joins, the song you've played and
-  skipped most in Music leaves, or among ties, the one the stations played
-  longest ago. A song you've played more than every song in "Radio (New)"
-  stays out of it. The dashboard's "Radio (New)" page shows your plays and
-  skips and marks the song that leaves next.
+- **Radio (New)** holds the 100 newest releases the stations have played,
+  by Apple Music's release date. When a newer release joins, the oldest
+  leaves, or among songs released the same day, the one the stations played
+  longest ago. An older release stays out. The dashboard's "Radio (New)"
+  page shows each song's release date and marks the song that leaves next.
+- **Radio (Unplayed)** holds 100 songs the stations played recently that
+  you haven't played much. Until 2026-10-22 it was named "Radio (New)";
+  Radio renamed it in Music, keeping its songs. When a new song joins, the
+  song you've played and skipped most in Music leaves, or among ties, the
+  one the stations played longest ago. A song you've played more than every
+  song in "Radio (Unplayed)" stays out of it. The dashboard's
+  "Radio (Unplayed)" page shows your plays and skips and marks the song that
+  leaves next.
 - **Radio Archive** holds the 10,000 songs played most recently, and drops
   the oldest the same way as "Radio".
 
@@ -97,7 +104,8 @@ shows "sign-in expired". Repeat step 4.
   Pushover message and an email that lists those songs, and both link to the
   review page.
 - **Playlists:** <http://jubi.local:8102/playlists/radio>,
-  <http://jubi.local:8102/playlists/new>, and
+  <http://jubi.local:8102/playlists/new>,
+  <http://jubi.local:8102/playlists/unplayed>, and
   <http://jubi.local:8102/playlists/archive> list each playlist's songs with
   the stations that played them. In Music, each song's comment gives its
   latest play and how often each station played it, such as
@@ -113,7 +121,8 @@ shows "sign-in expired". Repeat step 4.
 - **Status and data:** `radio status`, and `radio export > plays.csv` for
   every logged play.
 - **More stations:** add each with its network's command. Its songs join
-  the "Radio", "Radio (New)", and "Radio Archive" playlists, under the rules
+  the "Radio", "Radio (New)", "Radio (Unplayed)", and "Radio Archive"
+  playlists, under the rules
   above.
   - Audacy: `radio station add <slug>`, where the slug is the path in the
     station's audacy.com URL, such as `alt1021rva`.

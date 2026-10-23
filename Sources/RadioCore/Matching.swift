@@ -11,9 +11,12 @@ public struct CatalogSong: Codable, Equatable, Sendable {
     /// The recording's ISRC, which copies of it on other releases share.
     public var isrc: String?
     public var durationMillis: Int?
+    /// Such as "2026-10-02", or "2026" when Apple knows only the year. A
+    /// reissue or compilation keeps the recording's original date.
+    public var releaseDate: String?
 
     public init(id: String, name: String, artistName: String, albumName: String, url: String, isExplicit: Bool,
-                isrc: String? = nil, durationMillis: Int? = nil) {
+                isrc: String? = nil, durationMillis: Int? = nil, releaseDate: String? = nil) {
         self.id = id
         self.name = name
         self.artistName = artistName
@@ -22,6 +25,7 @@ public struct CatalogSong: Codable, Equatable, Sendable {
         self.isExplicit = isExplicit
         self.isrc = isrc
         self.durationMillis = durationMillis
+        self.releaseDate = releaseDate
     }
 }
 

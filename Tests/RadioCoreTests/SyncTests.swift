@@ -29,7 +29,8 @@ import Testing
         #expect(report.playlists["Radio"]?.added == 2)
         #expect(report.playlists["Radio Archive"]?.added == 2)
         #expect(harness.music.playlists() == [
-            "Radio": ["Africa", "My Hero"], "Radio (New)": ["Africa", "My Hero"], "Radio Archive": ["Africa", "My Hero"],
+            "Radio": ["Africa", "My Hero"], "Radio (New)": ["Africa", "My Hero"],
+            "Radio (Unplayed)": ["Africa", "My Hero"], "Radio Archive": ["Africa", "My Hero"],
         ])
     }
 
@@ -62,7 +63,7 @@ import Testing
         harness.play("Foo Fighters", "Everlong", on: "101-2000", minutesAgo: 2)
         _ = try await harness.radio.run()
 
-        #expect(harness.music.playlistNames() == ["Radio", "Radio (New)", "Radio Archive"])
+        #expect(harness.music.playlistNames() == ["Radio", "Radio (New)", "Radio (Unplayed)", "Radio Archive"])
         #expect(harness.music.playlists()["Radio"] == ["Uprising", "Everlong"])
         #expect(harness.http.requests("GET https://api.music.apple.com/v1/catalog/us/search").count == 2)
         // Each song counts as added by the station whose play placed it.
@@ -115,7 +116,7 @@ import Testing
         harness.music.addToCatalog("Macklemore & Ryan Lewis", "Can't Hold Us (feat. Ray Dalton)")
         harness.hubbard.play("Macklemore & Ryan Lewis", "Can't Hold Us", at: harness.clock.now.addingTimeInterval(-600))
         _ = try await harness.radio.poll()
-        executeSQL([
+        executeSQL(undoSchemaTwelve + [
             "UPDATE songs SET artist = 'Macklemore &amp; Ryan Lewis', key = 'macklemore and amp ryan lewis|cant hold us'",
             "UPDATE plays SET artist = 'Macklemore &amp; Ryan Lewis'",
             // Schema 6 had none of schema 8's additions.
@@ -292,7 +293,8 @@ import Testing
         _ = try await harness.radio.sync()
 
         #expect(harness.music.playlists() == [
-            "Radio": ["Africa", "Glycerine"], "Radio (New)": ["Africa", "Glycerine"], "Radio Archive": ["Africa", "Glycerine"],
+            "Radio": ["Africa", "Glycerine"], "Radio (New)": ["Africa", "Glycerine"],
+            "Radio (Unplayed)": ["Africa", "Glycerine"], "Radio Archive": ["Africa", "Glycerine"],
         ])
     }
 
@@ -342,7 +344,7 @@ import Testing
         async let b = second.sync()
         let reports = try await [a, b]
 
-        #expect(first.music.playlistNames() == ["Radio", "Radio (New)", "Radio Archive"])
+        #expect(first.music.playlistNames() == ["Radio", "Radio (New)", "Radio (Unplayed)", "Radio Archive"])
         #expect(first.music.playlists()["Radio"] == (0..<5).map { "Song \($0)" })
         #expect(reports.filter { $0.skippedReason != nil }.count == 1)
     }
