@@ -20,6 +20,11 @@ enum Pages {
         if let error = status.musicAppError {
             body += "<p class=\"problem\">Music.app can't update the playlists: \(escape(error))</p>"
         }
+        if let since = status.musicBehindSince {
+            body += "<p class=\"problem\">Music stopped taking in library changes around \(escape(displayTime(since))), "
+                + "probably because an alert is waiting for Music to be opened. Open Music on the Mac mini to see it. "
+                + "Until then, new songs can't join the playlists.</p>"
+        }
         if let error = status.jevError {
             body += "<p class=\"problem\">Jev can't judge songs held for review: \(escape(error))</p>"
         }

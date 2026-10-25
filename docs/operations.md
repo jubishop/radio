@@ -164,7 +164,12 @@ alerts:
   only about four hours of plays;
 - one when Apple Music has rejected the sign-in for an hour. Apple's 401 and
   403 responses both count as a rejection. Brief 401s happen, especially in
-  the first minutes after a new MusicKit key is created.
+  the first minutes after a new MusicKit key is created;
+- one when Music has stopped taking in library changes for 30 minutes,
+  usually because an alert is waiting for Music to be opened. Open Music on
+  the Mac mini and close the alert. Until then, new songs can't join the
+  playlists. The dashboard and `radio status` show this as soon as a run
+  finds it.
 
 Once a day, if any song is waiting for review, Radio also sends a review
 reminder, at about the time of day Radio first ran: a Pushover message with

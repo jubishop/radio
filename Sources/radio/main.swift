@@ -230,6 +230,9 @@ func main(_ arguments: [String]) async throws -> Int32 {
         print("Last sync: \(status.lastSyncAt.map(displayTime) ?? "never")\(status.lastSyncError.map { " (failed: \($0))" } ?? "")")
         print("Songs to review: \(status.heldCount)")
         if let error = status.musicAppError { print("Music.app: \(error)") }
+        if let since = status.musicBehindSince {
+            print("Music.app: behind its library since \(displayTime(since)); open Music to see the alert holding it back")
+        }
         if let error = status.jevError { print("Jev: \(error)") }
         print("Playlist \"\(Radio.playlistName)\": \(status.playlistCount) of \(radio.playlistLimit) songs")
         print("Playlist \"\(Radio.newPlaylistName)\": \(status.newCount) of \(radio.playlistLimit) songs")

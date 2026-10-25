@@ -510,7 +510,7 @@ final class FakeAppleMusic: Sendable {
 /// Music.app on the Mac, editing the fake library.
 final class FakeMusicApp: MusicApp {
     let music: FakeAppleMusic
-    private let state = Mutex<(failure: String?, calls: Int)>((nil, 0))
+    private let state = Mutex<(failure: String?, calls: Int, behind: Bool?)>((nil, 0, false))
 
     init(music: FakeAppleMusic) {
         self.music = music
@@ -520,6 +520,17 @@ final class FakeMusicApp: MusicApp {
 
     func fail(with message: String?) {
         state.withLock { $0.failure = message }
+    }
+
+    /// Whether Music.app is behind its library; nil when its log can't be
+    /// read.
+    func setBehind(_ behind: Bool?) {
+        state.withLock { $0.behind = behind }
+    }
+
+    func fellBehind(since date: Date) async throws -> Bool {
+        guard let behind = state.withLock({ $0.behind }) else { throw RadioError("log failed") }
+        return behind
     }
 
     func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult {

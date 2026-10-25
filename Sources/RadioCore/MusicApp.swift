@@ -93,6 +93,11 @@ public protocol MusicApp: Sendable {
     func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult
     /// Every library track's plays and skips.
     func listens() async throws -> [TrackListens]
+    /// Whether Music.app has changed the library from an out-of-date copy
+    /// of it since `date`. Music.app stops taking in the library's changes
+    /// while an alert waits for it to be opened, so it can't find songs the
+    /// web API adds. See docs/design.md.
+    func fellBehind(since date: Date) async throws -> Bool
 }
 
 /// Runs AppleScript in Music.app through `osascript`. Values travel as
@@ -100,11 +105,13 @@ public protocol MusicApp: Sendable {
 public struct ScriptedMusicApp: MusicApp {
     let timeout: TimeInterval
     let osascript: String
+    let log: String
 
-    /// Tests pass a stand-in for `osascript`.
-    public init(timeout: TimeInterval = 120, osascript: String = "/usr/bin/osascript") {
+    /// Tests pass stand-ins for `osascript` and `log`.
+    public init(timeout: TimeInterval = 120, osascript: String = "/usr/bin/osascript", log: String = "/usr/bin/log") {
         self.timeout = timeout
         self.osascript = osascript
+        self.log = log
     }
 
     public func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult {
@@ -136,6 +143,30 @@ public struct ScriptedMusicApp: MusicApp {
         Self.listens(fromOutput: try await runOSAScript(Self.listensScript, arguments: []))
     }
 
+    /// Looks in the unified log for the library agent's note that Music.app
+    /// changed the library from an older revision than the library's. It
+    /// logged one with every edit Radio made while an alert held Music.app
+    /// back, from 11:28 PM on 2026-10-24 to 9:13 AM the next day, and none
+    /// in the day before.
+    public func fellBehind(since date: Date) async throws -> Bool {
+        let output = try await run(log, [
+            "show", "--start", Self.logTime(date), "--style", "compact",
+            "--predicate", "process == \"AMPLibraryAgent\" AND eventMessage CONTAINS \"\(Self.behindNote)\"",
+        ], name: "log") { RadioError("Couldn't read Music's log: \($0)") }
+        return output.contains(Self.behindNote)
+    }
+
+    static let behindNote = "sent change using non-current revision"
+
+    /// A time as `log show` reads it, in UTC, which no change of clocks
+    /// makes ambiguous.
+    static func logTime(_ date: Date) -> String {
+        date.formatted(Date.VerbatimFormatStyle(
+            format: "\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits):\(second: .twoDigits)",
+            timeZone: .gmt, calendar: Calendar(identifier: .gregorian)
+        )) + "+0000"
+    }
+
     /// Reads the listens script's output: tracks separated by character 30
     /// and fields by character 31, which no title or artist contains.
     public static func listens(fromOutput output: String) -> [TrackListens] {
@@ -147,17 +178,24 @@ public struct ScriptedMusicApp: MusicApp {
     }
 
     private func runOSAScript(_ script: String, arguments: [String]) async throws -> String {
+        try await run(osascript, ["-e", script] + arguments, name: "Music", failure: Self.error(from:))
+    }
+
+    /// Runs a command and returns its output, or throws `failure` of its
+    /// errors when it fails.
+    private func run(_ executable: String, _ arguments: [String], name: String,
+                     failure: @escaping @Sendable (String) -> RadioError) async throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: osascript)
-        process.arguments = ["-e", script] + arguments
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
         let output = Pipe()
         let errors = Pipe()
         process.standardOutput = output
         process.standardError = errors
         let timeout = self.timeout
-        // Both pipes are read as osascript writes them. When they were read
-        // only after it exited, a reply longer than a pipe holds, such as
-        // every track's plays and skips, stalled it until the timeout.
+        // Both pipes are read as the command writes them. When osascript's
+        // were read only after it exited, a reply longer than a pipe holds,
+        // such as every track's plays and skips, stalled it until the timeout.
         let replies = Mutex((output: Data(), errors: Data()))
         let reading = DispatchGroup()
         return try await withCheckedThrowingContinuation { continuation in
@@ -167,9 +205,9 @@ public struct ScriptedMusicApp: MusicApp {
                     (String(decoding: $0.output, as: UTF8.self), String(decoding: $0.errors, as: UTF8.self))
                 }
                 if process.terminationReason == .uncaughtSignal {
-                    continuation.resume(throwing: RadioError("Music didn't respond within \(Int(timeout)) seconds"))
+                    continuation.resume(throwing: RadioError("\(name) didn't respond within \(Int(timeout)) seconds"))
                 } else if process.terminationStatus != 0 {
-                    continuation.resume(throwing: Self.error(from: stderr))
+                    continuation.resume(throwing: failure(stderr))
                 } else {
                     continuation.resume(returning: stdout.trimmingCharacters(in: .whitespacesAndNewlines))
                 }

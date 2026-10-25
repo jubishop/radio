@@ -74,6 +74,9 @@ public struct RadioStatus: Sendable {
     public var lastSyncError: String?
     /// Why Music.app couldn't update a playlist, until it can.
     public var musicAppError: String?
+    /// When a run first found Music.app behind its library, until a run
+    /// finds it caught up.
+    public var musicBehindSince: Date?
     /// Why Jev couldn't judge held songs, until it can.
     public var jevError: String?
     public var heldCount: Int
@@ -116,6 +119,9 @@ public actor Radio {
     /// Alert when Apple Music has rejected the sign-in for this long. A new
     /// MusicKit key answers 401 intermittently for minutes while it rolls out.
     static let authAlertDelay: TimeInterval = 60 * 60
+    /// Alert when Music.app has stayed behind its library this long. Until
+    /// it catches up, songs the web API adds can't join the playlists.
+    static let musicAlertDelay: TimeInterval = 30 * 60
     static let nudgeInterval: TimeInterval = 24 * 60 * 60
     /// Apple Music candidates kept for each held song, for Jev and review.
     static let storedCandidates = 10
@@ -360,10 +366,12 @@ public actor Radio {
 
     /// Polls, syncs, and sends any alerts. launchd runs this every 15 minutes.
     public func run() async throws -> (polls: [PollResult], sync: SyncReport) {
+        let started = now()
         let polls = try await poll()
         let sync = try await sync()
         try await sendFeedAlerts()
         try await sendAuthAlert()
+        try await watchMusicApp(since: started)
         try await sendReviewReminder()
         return (polls, sync)
     }
@@ -395,6 +403,33 @@ public actor Radio {
             link: signInURL
         )
         if sent { try store.setMetaDate("auth.alert_sent_at", now()) }
+    }
+
+    /// Notes whether Music.app changed the library from an out-of-date copy
+    /// during this run, and alerts once when it has stayed behind for the
+    /// alert delay. Music.app's "The Music Library file cannot be saved"
+    /// alert held it back unseen for nearly ten hours on 2026-10-24, because
+    /// it waits for Music to be opened. When Radio can't tell, nothing
+    /// changes.
+    private func watchMusicApp(since started: Date) async throws {
+        guard let musicApp, let behind = try? await musicApp.fellBehind(since: started) else { return }
+        guard behind else {
+            try store.setMetaDate("music.behind_since", nil)
+            try store.setMetaDate("music.alert_sent_at", nil)
+            return
+        }
+        let since = try store.metaDate("music.behind_since") ?? started
+        try store.setMetaDate("music.behind_since", since)
+        guard try store.metaDate("music.alert_sent_at") == nil, now().timeIntervalSince(since) >= Self.musicAlertDelay
+        else { return }
+        let sent = try await notifier.send(
+            title: "Radio: Music needs attention",
+            message: "Music on the Mac mini stopped taking in library changes around \(displayTime(since)), "
+                + "probably because an alert is waiting for Music to be opened. Open Music to see it. "
+                + "Until then, new songs can't join the playlists.",
+            link: dashboardURL
+        )
+        if sent { try store.setMetaDate("music.alert_sent_at", now()) }
     }
 
     /// Once a day, while songs wait for review, sends a push and an email
@@ -514,6 +549,7 @@ public actor Radio {
             lastSyncAt: try store.metaDate("sync.last_at"),
             lastSyncError: try store.meta("sync.last_error"),
             musicAppError: try store.meta("music.last_error"),
+            musicBehindSince: try store.metaDate("music.behind_since"),
             jevError: try store.meta("jev.last_error"),
             heldCount: try store.heldCount()
         )

@@ -294,6 +294,40 @@ import Testing
         #expect(listens.last == TrackListens(name: "Song 4999", artist: "Band", plays: 3, skips: 1))
     }
 
+    /// The library agent logged this note with every edit while an alert
+    /// held Music.app back on 2026-10-24.
+    @Test func musicIsBehindWhenTheLibraryAgentLogsAChangeFromAnOldRevision() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("log-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("log")
+        try """
+            #!/bin/sh
+            here=$(dirname "$0")
+            printf '%s\\n' "$@" > "$here/arguments"
+            [ -f "$here/broken" ] && { echo 'log: cannot read' >&2; exit 64; }
+            echo 'Timestamp               Ty Process[PID:TID]'
+            [ -f "$here/behind" ] && echo '2026-10-25 01:00:00.123 Df  AMPLibraryAgent[3409:3fbb] [com.apple.amp.library:service] ch> ClientID:200 sent change using non-current revision. client:27644 library:27700'
+            exit 0
+            """.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: log.path)
+        let music = ScriptedMusicApp(timeout: 10, log: log.path)
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        let start = try #require(utc.date(from: DateComponents(year: 2026, month: 10, day: 25, hour: 6, minute: 28, second: 10)))
+
+        #expect(try await !music.fellBehind(since: start))
+        let arguments = try String(contentsOf: directory.appendingPathComponent("arguments"), encoding: .utf8)
+        #expect(arguments.hasPrefix("show\n--start\n2026-10-25 06:28:10+0000\n"))
+        #expect(arguments.contains(#"process == "AMPLibraryAgent" AND eventMessage CONTAINS "sent change using non-current revision""#))
+
+        FileManager.default.createFile(atPath: directory.appendingPathComponent("behind").path, contents: nil)
+        #expect(try await music.fellBehind(since: start))
+
+        FileManager.default.createFile(atPath: directory.appendingPathComponent("broken").path, contents: nil)
+        await #expect(throws: RadioError.self) { try await music.fellBehind(since: start) }
+    }
+
     @Test func musicsPlaysAndSkipsAreReadFromTheScriptsOutput() {
         let record = String(UnicodeScalar(30)), field = String(UnicodeScalar(31))
         let output = ["Babydoll", "Dominic Fike", "12", "3"].joined(separator: field) + record

@@ -52,6 +52,21 @@ decisions, the constraints they rest on, and the questions still open. Feed deta
   changing it edits no playlist. On 2026-10-13, Music.app's scripting set the
   comment of an Apple Music track in "Radio", and the comment was still there
   three minutes later. None of the library's 3,846 tracks had a comment.
+- **An unseen Music.app alert can keep it from taking in library changes.**
+  On 2026-10-25 at 9:12 AM PDT, opening Music showed "The Music Library file
+  cannot be saved. A duplicate file name was specified." People have reported
+  this alert since 2021, and Apple hasn't said what causes it. Music.app had
+  stopped applying the library's changes at 11:28 PM the night before, right
+  after one of Radio's syncs, most likely when the save failed. Like any
+  alert from an app in the background, it waited for Music to be opened, and
+  dismissing it at 9:13 AM let Music.app catch up on about 3,600 changes at
+  once. In between, Radio's edits through Music.app still reached the
+  library and were saved, but Music.app couldn't find a song the web API
+  added at 12:13 AM until it caught up. With each of those edits, the
+  library agent (`AMPLibraryAgent`) logged that Music.app "sent change using
+  non-current revision". It logged none in the day before. Nothing was lost,
+  and "Radio", "Radio (New)", and "Radio (Unplayed)" each held 100 songs
+  afterward.
 - **Music.app finds a song only by title and artist.** Two catalog songs with
   the same title and artist, such as "STAY" on an album and on its single,
   are one entry to Music.app's scripting, which compares them ignoring case.
@@ -212,7 +227,45 @@ rolled it out, and one 401 had sent a false alert. Radio reads `PUSHOVER_USER_KE
 copy. Both names were present there, in an owner-only file, on 2026-10-13.
 The user accepted the recommendation, whose reason was that a lapsed token or
 a dead feed is otherwise invisible until the playlist stops growing. Radio
-sends no alerts for new songs.
+sends no alerts for new songs. A third case,
+[Music.app falling behind its library](#alert-when-musicapp-falls-behind-its-library),
+came on 2026-10-25.
+
+### Alert when Music.app falls behind its library
+
+Accepted 2026-10-25. After an unseen Music.app alert
+[kept it from taking in library changes](#constraints) for nearly ten hours,
+the user chose the recommended Pushover alert over a dashboard notice alone
+or no change. Radio can't prevent the alert, which is Music.app's, so it
+makes the stall visible:
+
+- **Detection:** after each scheduled run's sync, Radio asks the unified log
+  (`log show`) whether `AMPLibraryAgent` logged "sent change using
+  non-current revision" since the run began. A run that finds it marks Music
+  as behind, a run that doesn't clears the mark, and a run that can't read
+  the log changes nothing. This needs no new permission and took about 1.4
+  seconds on 2026-10-25.
+- **Alert:** once Music has been behind for 30 minutes, one Pushover alert
+  says to open Music on the Mac mini, and links to the dashboard. It can
+  alert again only after Music catches up. The dashboard and `radio status`
+  show the problem as soon as a run finds it.
+
+The rejected signals:
+
+- **Music's windows:** a waiting alert has no window until Music is opened.
+  Two test dialogs on 2026-10-25 showed none until the user clicked Music in
+  the Dock.
+- **A song that doesn't reach Music.app:** Music.app also misses some songs
+  for other reasons. "Black Stars" waited about 14 hours on 2026-10-23,
+  including after Music was reopened, so this would send false alerts.
+
+The tradeoffs:
+
+- The alert comes 30 to 45 minutes after Music stalls, since runs are about
+  15 minutes apart.
+- It depends on log text Apple doesn't document. If Apple changes it, the
+  alert stops firing; it doesn't send false ones.
+- A run whose sync made no Music.app edits finds no note and clears the mark.
 
 ### Support many stations
 

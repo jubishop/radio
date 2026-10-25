@@ -85,6 +85,78 @@ import Testing
         #expect(harness.music.playlists()["Radio"] == ["Uprising"])
     }
 
+    /// Music.app's "The Music Library file cannot be saved" alert waited,
+    /// unseen, for Music to be opened from 11:28 PM on 2026-10-24 to 9:13 AM
+    /// the next day, and Music.app took in no library changes meanwhile.
+    @Test func musicBehindItsLibraryForHalfAnHourAlertsOnceAndShowsOnTheDashboard() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.musicApp.setBehind(true)
+        let firstRun = harness.clock.now
+
+        _ = try await harness.radio.run()
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.isEmpty)
+        #expect(try await harness.radio.status().musicBehindSince == firstRun)
+        let page = String(decoding: await Dashboard(radio: harness.radio).handle(
+            WebRequest(method: "GET", path: "/", query: [:], headers: [:], body: Data(), isLoopback: false)
+        ).body, as: UTF8.self)
+        #expect(page.contains("Music stopped taking in library changes around \(displayTime(firstRun))"))
+
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes == ["Radio: Music needs attention"])
+        #expect(harness.pushLinks == ["http://jubi.local:8102"])
+
+        harness.musicApp.setBehind(false)
+        _ = try await harness.radio.run()
+        #expect(try await harness.radio.status().musicBehindSince == nil)
+        harness.musicApp.setBehind(true)
+        _ = try await harness.radio.run()
+        harness.clock.advance(hours: 0.5)
+        _ = try await harness.radio.run()
+        #expect(harness.pushes.count == 2)
+    }
+
+    @Test func musicCatchingUpWithinHalfAnHourDoesNotAlert() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.musicApp.setBehind(true)
+        _ = try await harness.radio.run()
+        harness.clock.advance(hours: 0.25)
+        harness.musicApp.setBehind(false)
+        _ = try await harness.radio.run()
+        harness.musicApp.setBehind(true)
+        _ = try await harness.radio.run()
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+
+        #expect(harness.pushes.isEmpty)
+    }
+
+    /// A run that can't read the log can't tell whether Music.app caught up.
+    @Test func anUnreadableLogLeavesMusicAsLastSeen() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.musicApp.setBehind(true)
+        _ = try await harness.radio.run()
+        harness.musicApp.setBehind(nil)
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+        #expect(try await harness.radio.status().musicBehindSince != nil)
+        harness.musicApp.setBehind(true)
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+
+        #expect(harness.pushes == ["Radio: Music needs attention"])
+    }
+
     @Test func theDailyReminderCoversEverySongWaitingForReview() async throws {
         let harness = try Harness()
         try await harness.signIn()
