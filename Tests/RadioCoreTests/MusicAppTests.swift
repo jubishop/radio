@@ -327,6 +327,78 @@ import Testing
         #expect(try await harness.radio.status().playlistCount == 3)
     }
 
+    /// Two stations' spellings can match two releases with the same title
+    /// and artist, which Music.app finds as one track.
+    @Test func aMatchWithTheTitleAndArtistOfAnEarlierOneSharesItsEntry() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Band", "Song (feat. Guest)")
+        harness.play("Band", "Song")
+        _ = try await harness.radio.run()
+        harness.music.addToCatalog("Band", "Song (Feat. Guest)", album: "Hits", explicit: true)
+        harness.clock.advance(hours: 0.25)
+        harness.play("Band", "Song Feat. Guest")
+
+        let (_, sync) = try await harness.radio.run()
+
+        #expect(sync.matched == 1)
+        #expect(harness.music.playlists()["Radio Archive"] == ["Song (feat. Guest)"])
+        let status = try await harness.radio.status()
+        let counts = [status.playlistCount, status.newCount, status.unplayedCount, status.archiveCount]
+        #expect(counts == [1, 1, 1, 1])
+    }
+
+    /// On 2026-10-25, four such pairs left "Radio Archive" with 836 songs
+    /// while Radio counted 840.
+    @Test func upgradingMergesMatchesMusicCannotTellApart() async throws {
+        let harness = try Harness()
+        try await harness.signIn()
+        _ = try await harness.radio.addStation(slug: "alt1021rva")
+        harness.music.addToCatalog("Band", "Song (feat. Guest)", released: "2001-01-01")
+        harness.play("Band", "Song")
+        _ = try await harness.radio.run()
+        let hits = harness.music.addToCatalog("Band", "Song (Feat. Guest)", album: "Hits", released: "2020-01-01")
+        harness.clock.advance(hours: 0.25)
+        let later = harness.clock.now.formatted(.iso8601)
+        // Schema 12 matched the second spelling to the second release, and
+        // Music.app placed it as the first release's entry.
+        executeSQL([
+            """
+            INSERT INTO songs (id, key, artist, title, status, catalog_id, catalog_url, catalog_name, catalog_artist,
+                catalog_album, matched_by, first_heard_at, resolved_at)
+            VALUES (2, 'band|song feat guest', 'Band', 'Song Feat. Guest', 'matched', '\(hits.id)', '\(hits.url)',
+                'Song (Feat. Guest)', 'Band', 'Hits', 'auto', '\(later)', '\(later)')
+            """,
+            "INSERT INTO plays VALUES (1, 'later', '\(later)', 'Band', 'Song Feat. Guest', 2)",
+            "INSERT INTO playlist_tracks SELECT kind, '\(hits.id)', 2, 1, '\(later)', '\(later)' FROM playlists",
+            "INSERT INTO release_dates VALUES ('\(hits.id)', '2020-01-01')",
+            "PRAGMA user_version = 12",
+        ], in: harness.home)
+        let clock = harness.clock
+        let upgraded = try Radio(
+            home: harness.home, http: harness.http, sources: [AudacySource(http: harness.http)],
+            notifier: PushoverNotifier(http: harness.http, userKey: nil, apiKey: nil), musicApp: harness.musicApp,
+            now: { clock.now }
+        )
+        let editsBefore = harness.musicApp.calls
+
+        _ = try await upgraded.run()
+
+        let status = try await upgraded.status()
+        let counts = [status.playlistCount, status.newCount, status.unplayedCount, status.archiveCount]
+        #expect(counts == [1, 1, 1, 1])
+        #expect(harness.music.playlists()["Radio Archive"] == ["Song (feat. Guest)"])
+        let page = String(decoding: await Dashboard(radio: upgraded).handle(
+            WebRequest(method: "GET", path: "/playlists/new", query: [:], headers: [:], body: Data(), isLoopback: false)
+        ).body, as: UTF8.self)
+        #expect(page.contains("released 2001-01-01"))
+        #expect(!page.contains("2020-01-01"))
+        #expect(page.contains("Alt 102.1 ×2"))
+        // Only the comment, which now counts both plays, changes.
+        #expect(harness.musicApp.calls == editsBefore + 1)
+    }
+
     @Test func theArchiveKeepsEverySongAndMovesReplays() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
         harness.music.addToCatalog("Band", "D")

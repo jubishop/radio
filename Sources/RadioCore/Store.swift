@@ -191,7 +191,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 12
+    private static let schemaVersion: Int64 = 13
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -211,6 +211,7 @@ final class Store {
             if version < 10 { try migrateToSchemaTen() }
             if version < 11 { try migrateToSchemaEleven() }
             if version < 12 { try migrateToSchemaTwelve() }
+            if version < 13 { try migrateToSchemaThirteen() }
         }
     }
 
@@ -459,6 +460,69 @@ final class Store {
         try db.execute("PRAGMA user_version = 12")
     }
 
+    /// Schema 13 merges matches Music.app can't tell apart: catalog songs
+    /// with the same title and artist, such as "STAY" on an album and on its
+    /// single, which shared one entry in each playlist though Radio counted
+    /// two. On 2026-10-25, four such pairs left "Radio Archive" with 836
+    /// songs while Radio counted 840. Each pair takes the catalog song of
+    /// its earlier match, as matching does since.
+    private func migrateToSchemaThirteen() throws {
+        var earliest: [String: Row] = [:]
+        for row in try db.query(
+            """
+            SELECT catalog_id, catalog_url, catalog_name, catalog_artist, catalog_album FROM songs
+            WHERE status = 'matched' AND catalog_name IS NOT NULL AND catalog_artist IS NOT NULL
+            ORDER BY resolved_at, id
+            """
+        ) {
+            let key = MusicAppSong.key(name: row.string("catalog_name")!, artist: row.string("catalog_artist")!)
+            guard let kept = earliest[key] else {
+                earliest[key] = row
+                continue
+            }
+            if row.string("catalog_id") != kept.string("catalog_id") {
+                try mergeCatalogSong(row.string("catalog_id")!, into: kept)
+            }
+        }
+        try db.execute("PRAGMA user_version = 13")
+    }
+
+    /// Moves a catalog song's matches, playlist entries, and records to
+    /// `kept`, keeping the records `kept` already has. Music.app's one entry
+    /// for both sits where the later placing put it.
+    private func mergeCatalogSong(_ catalogID: String, into kept: Row) throws {
+        let keptID = kept.string("catalog_id")!
+        try db.execute(
+            """
+            UPDATE songs SET catalog_id = ?, catalog_url = ?, catalog_name = ?, catalog_artist = ?, catalog_album = ?
+            WHERE catalog_id = ?
+            """,
+            [kept["catalog_id"], kept["catalog_url"], kept["catalog_name"], kept["catalog_artist"], kept["catalog_album"],
+             .text(catalogID)]
+        )
+        try db.execute(
+            """
+            UPDATE playlist_tracks AS t SET
+                added_at = MIN(t.added_at, m.added_at),
+                position_played_at = NULLIF(MAX(COALESCE(t.position_played_at, ''), COALESCE(m.position_played_at, '')), '')
+            FROM playlist_tracks AS m
+            WHERE t.catalog_id = ? AND m.catalog_id = ? AND m.playlist = t.playlist
+            """,
+            [.text(keptID), .text(catalogID)]
+        )
+        try db.execute(
+            """
+            UPDATE unheard_choices AS c SET chosen = MAX(c.chosen, m.chosen), played_at = MAX(c.played_at, m.played_at)
+            FROM unheard_choices AS m WHERE c.catalog_id = ? AND m.catalog_id = ?
+            """,
+            [.text(keptID), .text(catalogID)]
+        )
+        for table in ["playlist_tracks", "unheard_choices", "library_requests", "music_comments", "listens", "release_dates"] {
+            try db.execute("UPDATE OR IGNORE \(table) SET catalog_id = ? WHERE catalog_id = ?", [.text(keptID), .text(catalogID)])
+            try db.execute("DELETE FROM \(table) WHERE catalog_id = ?", [.text(catalogID)])
+        }
+    }
+
     /// The playlist Music.app must rename before the next sync changes any,
     /// by its kind.
     static let renameKey = "playlist.rename"
@@ -602,7 +666,11 @@ final class Store {
         try db.query("SELECT * FROM songs WHERE id = ?", [.integer(id)]).first.map(song(from:))
     }
 
+    /// Music.app tells songs apart only by title and artist, so a match to a
+    /// catalog song with the title and artist of an earlier match takes the
+    /// earlier match's catalog song, and the two share each playlist entry.
     func markMatched(songID: Int64, catalog: CatalogSong, by method: String, at date: Date) throws {
+        let catalog = try earliestMatch(like: catalog, excluding: songID) ?? catalog
         try db.execute(
             """
             UPDATE songs SET status = 'matched', catalog_id = ?, catalog_url = ?, catalog_name = ?,
@@ -612,6 +680,23 @@ final class Store {
             [.text(catalog.id), .text(catalog.url), .text(catalog.name), .text(catalog.artistName),
              .text(catalog.albumName), .text(method), .text(iso(date)), .integer(songID)]
         )
+    }
+
+    /// The catalog song of the earliest match with the title and artist of
+    /// `catalog`, as Music.app compares them, preferring `catalog` itself.
+    private func earliestMatch(like catalog: CatalogSong, excluding songID: Int64) throws -> CatalogSong? {
+        let key = MusicAppSong.key(name: catalog.name, artist: catalog.artistName)
+        return try db.query(
+            """
+            SELECT catalog_id, catalog_url, catalog_name, catalog_artist, catalog_album FROM songs
+            WHERE status = 'matched' AND id != ? AND catalog_name IS NOT NULL AND catalog_artist IS NOT NULL
+            ORDER BY catalog_id = ? DESC, resolved_at, id
+            """,
+            [.integer(songID), .text(catalog.id)]
+        ).first { MusicAppSong.key(name: $0.string("catalog_name")!, artist: $0.string("catalog_artist")!) == key }.map {
+            CatalogSong(id: $0.string("catalog_id")!, name: $0.string("catalog_name")!, artistName: $0.string("catalog_artist")!,
+                        albumName: $0.string("catalog_album") ?? "", url: $0.string("catalog_url") ?? "", isExplicit: false)
+        }
     }
 
     func setCatalogDetails(_ catalog: CatalogSong) throws {

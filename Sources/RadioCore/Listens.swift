@@ -55,20 +55,15 @@ extension Radio {
         music.succeeded = true
         var byTitle: [String: Listens] = [:]
         for track in tracks {
-            let key = Self.listensKey(track.name, track.artist)
+            let key = MusicAppSong.key(name: track.name, artist: track.artist)
             let sum = byTitle[key] ?? Listens(plays: 0, skips: 0)
             byTitle[key] = Listens(plays: sum.plays + track.plays, skips: sum.skips + track.skips)
         }
         var listens: [String: Listens] = [:]
         for song in try store.catalogTitles() {
-            listens[song.catalogID] = byTitle[Self.listensKey(song.name, song.artist)]
+            listens[song.catalogID] = byTitle[MusicAppSong.key(name: song.name, artist: song.artist)]
         }
         try store.recordListens(listens)
-    }
-
-    /// Music.app compares titles and artists ignoring case.
-    private static func listensKey(_ name: String, _ artist: String) -> String {
-        name.lowercased() + "\u{1F}" + artist.lowercased()
     }
 
     /// Lets each song a station played since Radio last chose contend for

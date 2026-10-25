@@ -42,6 +42,12 @@ public struct MusicAppSong: Sendable {
         self.artist = artist
         self.album = album
     }
+
+    /// Music.app tells songs apart by title and artist, ignoring case, so
+    /// songs with the same key share one entry in a playlist.
+    static func key(name: String, artist: String) -> String {
+        name.lowercased() + "\u{1F}" + artist.lowercased()
+    }
 }
 
 /// How often the user played and skipped a library track in Music, as its

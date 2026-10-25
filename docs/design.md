@@ -52,6 +52,11 @@ decisions, the constraints they rest on, and the questions still open. Feed deta
   changing it edits no playlist. On 2026-10-13, Music.app's scripting set the
   comment of an Apple Music track in "Radio", and the comment was still there
   three minutes later. None of the library's 3,846 tracks had a comment.
+- **Music.app finds a song only by title and artist.** Two catalog songs with
+  the same title and artist, such as "STAY" on an album and on its single,
+  are one entry to Music.app's scripting, which compares them ignoring case.
+  On 2026-10-25, stations' different spellings of four songs had matched
+  such pairs, so "Radio Archive" held 836 songs while Radio counted 840.
 
 ## Decisions
 
@@ -447,6 +452,27 @@ The rejected alternatives were to keep adding through the API and re-add
 lost songs, which Music.app's next upload would wipe out again, and to avoid
 Music.app edits just after API adds, which still races because Music.app
 uploads at times Radio can't see.
+
+### Give each title and artist one match
+
+Accepted 2026-10-25. Music.app
+[finds a song only by title and artist](#constraints), so Radio counted
+songs its playlists didn't hold. The user asked to fix it. When a song
+matches a catalog song with the title and artist of an earlier match,
+ignoring case, it takes the earlier match's catalog song instead, whether
+matching, Jev, or the user chose it. Its plays then count toward that song,
+and it shares that song's entry, comment, and release date.
+
+Upgrading merges the four pairs matched before this, each into its earlier
+match. Each playlist's entry keeps the earlier of the two times it was added
+and the later of the two placings, which is where Music.app's one entry
+sits, so nothing moves. A rehearsal on a copy of the live database on
+2026-10-25 left "Radio Archive" at 836 songs, the count in Music, and no
+merged song due to move.
+
+The tradeoff is that a song the user matched by hand to one release can
+show another release with the same title and artist. Music.app plays one
+track for both anyway.
 
 ### Prefer explicit versions
 
