@@ -18,8 +18,7 @@ bin/check --full
 Setup needs Git and Python 3.9 or later, and checks also need ShellCheck.
 Radio is a Swift package with no third-party dependencies, so it has no
 `bin/setup-application`; SwiftPM builds it on first use.
-QMD and direnv are optional; setup reports skipped features. Install td and
-run `td init` as described in [task tracking](foundation/task-tracking.md).
+QMD and direnv are optional; setup reports skipped features.
 Create `.envrc` only when the project needs environment settings, and review
 it before running `direnv allow`; search does not need it.
 
@@ -63,7 +62,7 @@ Radio runs on the Mac mini. Deploy by running `bin/deploy` from an up-to-date
 and reloads both LaunchAgents. [Operations](operations.md) covers first-time
 setup and day-to-day use.
 
-Pushing never deploys. Changes to Markdown, tests, CI, or task tracking need no
+Pushing never deploys. Changes to Markdown, tests, or CI need no
 `bin/deploy`. Run it after any change to `Package.swift`, `Sources/`, or
 `bin/deploy`. When unsure, run it, since it's safe to repeat. Following the
 [deployment policy](foundation/engineering-policy.md#deployment-decisions),
@@ -74,9 +73,8 @@ Copy `radio.sqlite` with SQLite's `.backup` command into an empty scratch
 directory, then run a command from the new checkout, such as
 `RADIO_HOME=<scratch> RADIO_ENV_FILE=/dev/null swift run radio status`, so the
 copy is migrated. Check the result against the live data before deploying.
-The schema 3 and 4 migrations were rehearsed this way on 2026-10-13
-(td-b818f2), schema 7 on 2026-10-15 (td-224df6), and schemas 8 and 9 the same
-day (td-810dd1).
+The schema 3 and 4 migrations were rehearsed this way on 2026-10-13,
+schema 7 on 2026-10-15, and schemas 8 and 9 the same day.
 
 ## Project Starter
 

@@ -552,7 +552,7 @@ The user chose strict matching because the API can't remove a wrong track,
 so a bad match would stay in the playlist until it's deleted by hand in Music.
 
 On 2026-10-15 the user approved fixing gaps that held back songs Apple Music
-credits differently (td-224df6). The artists now match when either credit's
+credits differently. The artists now match when either credit's
 lead artist appears anywhere in the other, so "21 Savage, Metro Boomin, The
 Weeknd" matches "Metro Boomin, The Weeknd & 21 Savage". Matching also splits
 "BEYONCE/JAY-Z" and "Usher f/ Pitbull" into two artists, and ignores a
@@ -566,7 +566,7 @@ the 15 earlier manual picks.
 
 ### Let Jev resolve held-back songs
 
-Accepted 2026-10-15 (td-810dd1). Each sync asks TypeSafe's Jev about every
+Accepted 2026-10-15. Each sync asks TypeSafe's Jev about every
 held song it hasn't judged, with one Choice question: which of these
 recordings did the station play, or none of them? Held songs now keep the
 top ten Apple Music candidates instead of three. The review page shows three
@@ -891,9 +891,8 @@ checks.
 
 ## Accepted implementation defaults
 
-Accepted 2026-10-13. The user approved these proposed defaults that day.
-td-b818f2 records the user-approved deploys of the single "Radio" playlist
-and "Radio Archive".
+Accepted 2026-10-13. The user approved these proposed defaults that day,
+and approved the deploys of the single "Radio" playlist and "Radio Archive".
 
 - **Upgrading to one playlist:** the web API can't rename a playlist or
   remove its entries, so the upgrade doesn't reuse a station's playlist. The
@@ -989,4 +988,4 @@ explicitly approved them.
 
 - Whether songs Radio drops from "Radio" and "Radio Archive" should also
   leave the library. Radio keeps them there for now, and the user hasn't
-  decided (td-b818f2, 2026-10-13).
+  decided (2026-10-13).
