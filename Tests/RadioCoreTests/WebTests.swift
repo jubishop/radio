@@ -272,6 +272,31 @@ import Testing
         }
     }
 
+    /// Since 2026-10-29, a favorite or Suggest Less song leaves
+    /// "Radio (Unplayed)" first.
+    @Test func thePlaylistPagesShowFavoritesAndSuggestLess() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
+        harness.music.favorite("A")
+        harness.music.suggestLess("B")
+        harness.music.setListens("C", plays: 2)
+        harness.clock.advance(hours: 0.25)
+        _ = try await harness.radio.run()
+
+        let unplayed = text(await Dashboard(radio: harness.radio).handle(request("GET", "/playlists/unplayed")))
+
+        #expect(unplayed.contains("A new song pushes out one you favorited or marked Suggest Less"))
+        let songs = unplayed.components(separatedBy: "<li>").dropFirst()
+        let a = try #require(songs.first { $0.contains("Band – A") })
+        let b = try #require(songs.first { $0.contains("Band – B") })
+        let c = try #require(songs.first { $0.contains("Band – C") })
+        #expect(a.contains(#"<span class="listens">favorite</span> <span class="badge drop">drops next</span>"#))
+        #expect(b.contains(#"<span class="listens">Suggest Less</span>"#))
+        #expect(c.contains(#"<span class="listens">2 plays</span>"#))
+        let radio = text(await Dashboard(radio: harness.radio).handle(request("GET", "/playlists/radio")))
+        #expect(radio.contains(#"<span class="listens">favorite</span>"#))
+        #expect(!radio.contains("drops next"))
+    }
+
     /// "Radio (New)" shows each song's release date and marks the oldest
     /// release, which a newer one will push out.
     @Test func theRadioNewPageShowsReleaseDatesAndWhatDropsNext() async throws {

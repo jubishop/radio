@@ -70,14 +70,15 @@ enum Pages {
     }
 
     /// A playlist's songs, most recently played first, with the stations
-    /// that played each one and how often, and the user's plays and skips.
+    /// that played each one and how often, and the user's plays, skips,
+    /// favorites, and Suggest Less.
     /// "Radio (New)" adds each song's release date, and it and
     /// "Radio (Unplayed)" mark the song the next new one will push out.
     static func playlist(_ kind: Playlist.Kind, name: String, entries: [PlaylistEntry]) -> String {
         let count = "\(entries.count) song\(entries.count == 1 ? "" : "s")"
         let rule = switch kind {
         case .newest: " A newer release pushes out the oldest, or among songs released the same day, the one played longest ago."
-        case .unheard: " A new song pushes out the one you've played and skipped most in Music, or among ties, the one played longest ago."
+        case .unheard: " A new song pushes out one you favorited or marked Suggest Less in Music, or else the one you've played and skipped most, or among ties, the one played longest ago."
         case .recent, .archive: ""
         }
         var body = """
@@ -103,9 +104,11 @@ enum Pages {
         return page(title: "\(name) · Radio", body: body + "</section>", refresh: false)
     }
 
-    /// Such as "3 plays · 1 skip", leaving out a count of zero.
+    /// Such as "favorite · 3 plays · 1 skip", leaving out a count of zero.
     private static func listens(_ listens: Listens) -> String {
         var parts: [String] = []
+        if listens.favorited { parts.append("favorite") }
+        if listens.disliked { parts.append("Suggest Less") }
         if listens.plays > 0 { parts.append("\(listens.plays) play\(listens.plays == 1 ? "" : "s")") }
         if listens.skips > 0 { parts.append("\(listens.skips) skip\(listens.skips == 1 ? "" : "s")") }
         return parts.isEmpty ? "" : " <span class=\"listens\">\(parts.joined(separator: " · "))</span>"

@@ -448,6 +448,49 @@ newest were all released in 2026, from "Black Stars" by The Hunger Games &
 The Smashing Pumpkins (2026-10-16) to "Fabulous" by MEEK (2026-01-30), which
 would leave first.
 
+### Let favorites and Suggest Less leave "Radio (Unplayed)" first
+
+Accepted 2026-10-29. This changes which song leaves "Radio (Unplayed)"
+first, under the rules [above](#push-the-song-you-played-most-out-of-radio).
+The user asked whether every song they play counts as a play or a skip. It
+doesn't: Music.app counts a play when a song plays to the end and a skip when
+it's skipped about 2 to 20 seconds in, so a song left after that counts as
+neither, and Radio read only those two counts. The user listens on the Mac
+mini and on other devices, including CarPlay, and chose:
+
+- **Favorites and Suggest Less leave first.** A song favorited or marked
+  Suggest Less in Music leaves before every other song, whatever its plays
+  and skips. Among the rest, the song with the most plays and skips, summed,
+  leaves first, then the one the stations played longest ago, as before.
+  CarPlay has a Suggest Less button, and Siri's "I don't like this song" and
+  "Favorite this song" work there too. Both marks reach Music.app on the Mac
+  mini through Sync Library: on 2026-10-29 it held 474 favorites, and a
+  Suggest Less the user set on their iPhone arrived within a minute.
+- **Earlier favorites count.** On 2026-10-29, 101 of Radio's 981 songs were
+  favorited, 6 of them in "Radio (Unplayed)" with no plays or skips. The user
+  chose to count them, so those 6 leave at the next syncs and the rest stay
+  out. The stations play about 500 songs a day, so a song first in line
+  leaves at the next sync.
+- **Only "Radio (Unplayed)".** "Radio" and "Radio (New)" ignore both marks,
+  so a Suggest Less song can still play there, and "Radio Archive" stays a
+  record of what the stations played. The user chose to keep the change to
+  the playlist they asked about.
+
+A song left after about 20 seconds without a mark still counts as nothing.
+
+Ruled out on 2026-10-29:
+
+- **Timing playback on the Mac mini.** Music.app announces each play, pause,
+  and track change to other processes, so a third LaunchAgent could time
+  each song there and count one left partway through. The user chose not to
+  take on that complexity, since marks cover the gap on every device.
+- **Apple Music's listening history.** The API's recently played tracks have
+  no play times and list a song once however often it repeats. Developers on
+  Apple's forums report that since about 2026-08-05 it omits songs in the
+  library, and every song in "Radio (Unplayed)" is in the library.
+- **An iPhone app watching playback.** iOS suspends background apps, so it
+  would miss plays unless the app stayed open.
+
 ### Add a larger "Radio Archive" playlist
 
 Accepted 2026-10-13. The user asked for a second playlist, "Radio Archive",

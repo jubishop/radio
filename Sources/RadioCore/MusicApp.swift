@@ -51,18 +51,24 @@ public struct MusicAppSong: Sendable {
 }
 
 /// How often the user played and skipped a library track in Music, as its
-/// Plays and Skips columns count them.
+/// Plays and Skips columns count them, and whether they favorited it or
+/// marked it Suggest Less.
 public struct TrackListens: Equatable, Sendable {
     public var name: String
     public var artist: String
     public var plays: Int
     public var skips: Int
+    public var favorited: Bool
+    /// Suggest Less, which Music.app's scripting calls disliked.
+    public var disliked: Bool
 
-    public init(name: String, artist: String, plays: Int, skips: Int) {
+    public init(name: String, artist: String, plays: Int, skips: Int, favorited: Bool = false, disliked: Bool = false) {
         self.name = name
         self.artist = artist
         self.plays = plays
         self.skips = skips
+        self.favorited = favorited
+        self.disliked = disliked
     }
 }
 
@@ -91,7 +97,7 @@ public enum MusicAppResult: Equatable, Sendable {
 /// docs/design.md.
 public protocol MusicApp: Sendable {
     func perform(_ action: MusicAppAction, playlist: MusicAppPlaylist, song: MusicAppSong) async throws -> MusicAppResult
-    /// Every library track's plays and skips.
+    /// Every library track's plays, skips, and marks.
     func listens() async throws -> [TrackListens]
     /// Whether Music.app has changed the library from an out-of-date copy
     /// of it since `date`. Music.app stops taking in the library's changes
@@ -172,8 +178,9 @@ public struct ScriptedMusicApp: MusicApp {
     public static func listens(fromOutput output: String) -> [TrackListens] {
         output.split(separator: "\u{1E}").compactMap { record in
             let fields = record.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init)
-            guard fields.count == 4, let plays = Int(fields[2]), let skips = Int(fields[3]) else { return nil }
-            return TrackListens(name: fields[0], artist: fields[1], plays: plays, skips: skips)
+            guard fields.count == 6, let plays = Int(fields[2]), let skips = Int(fields[3]) else { return nil }
+            return TrackListens(name: fields[0], artist: fields[1], plays: plays, skips: skips,
+                                favorited: fields[4] == "true", disliked: fields[5] == "true")
         }
     }
 
@@ -324,14 +331,19 @@ public struct ScriptedMusicApp: MusicApp {
                 set trackArtists to artist of every track of library playlist 1
                 set trackPlays to played count of every track of library playlist 1
                 set trackSkips to skipped count of every track of library playlist 1
+                set trackFavorites to favorited of every track of library playlist 1
+                set trackDislikes to disliked of every track of library playlist 1
             end tell
-            if (count of trackArtists) is not (count of trackNames) or (count of trackPlays) is not (count of trackNames) ¬
-                or (count of trackSkips) is not (count of trackNames) then error "The library changed while Radio read it."
+            set trackCount to count of trackNames
+            if (count of trackArtists) is not trackCount or (count of trackPlays) is not trackCount ¬
+                or (count of trackSkips) is not trackCount or (count of trackFavorites) is not trackCount ¬
+                or (count of trackDislikes) is not trackCount then error "The library changed while Radio read it."
             set fieldMark to character id 31
             set trackLines to {}
-            repeat with i from 1 to count of trackNames
+            repeat with i from 1 to trackCount
                 set end of trackLines to (item i of trackNames) & fieldMark & (item i of trackArtists) & fieldMark ¬
-                    & ((item i of trackPlays) as text) & fieldMark & ((item i of trackSkips) as text)
+                    & ((item i of trackPlays) as text) & fieldMark & ((item i of trackSkips) as text) & fieldMark ¬
+                    & ((item i of trackFavorites) as text) & fieldMark & ((item i of trackDislikes) as text)
             end repeat
             set AppleScript's text item delimiters to character id 30
             return trackLines as text

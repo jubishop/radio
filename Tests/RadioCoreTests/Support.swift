@@ -46,9 +46,13 @@ func executeSQL(_ statements: [String], in home: RadioHome) {
     }
 }
 
-/// Takes a test database back from schema 12 to schema 11, which had no
+/// Takes a test database back from schema 14 to schema 13, which had no
+/// favorites or Suggest Less.
+let undoSchemaFourteen = ["ALTER TABLE listens DROP COLUMN favorited", "ALTER TABLE listens DROP COLUMN disliked"]
+
+/// Takes a test database back from schema 14 to schema 11, which had no
 /// release dates or "Radio (New)" of the newest releases.
-let undoSchemaTwelve = [
+let undoSchemaTwelve = undoSchemaFourteen + [
     "DROP TABLE release_dates", "DELETE FROM playlist_tracks WHERE playlist = 'newest'",
     "DELETE FROM playlists WHERE kind = 'newest'", "DELETE FROM meta WHERE key = 'playlist.rename'",
 ]
@@ -245,6 +249,9 @@ final class FakeAppleMusic: Sendable {
         var comments: [String: String] = [:]
         /// The user's plays and skips in Music.app, by catalog song.
         var listens: [String: (plays: Int, skips: Int)] = [:]
+        /// Catalog songs the user favorited or marked Suggest Less.
+        var favorited: Set<String> = []
+        var disliked: Set<String> = []
     }
     private let catalog = Mutex<[CatalogSong]>([])
     /// Release dates by catalog song, for songs given one.
@@ -416,13 +423,26 @@ final class FakeAppleMusic: Sendable {
         state.withLock { state in for id in ids { state.listens[id] = (plays, skips) } }
     }
 
-    /// Music.app's plays and skips of every library track.
+    /// Favorites a song in Music.
+    func favorite(_ title: String) {
+        let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
+        state.withLock { $0.favorited.formUnion(ids) }
+    }
+
+    /// Marks a song Suggest Less in Music.
+    func suggestLess(_ title: String) {
+        let ids = catalog.withLock { $0 }.filter { $0.name == title }.map(\.id)
+        state.withLock { $0.disliked.formUnion(ids) }
+    }
+
+    /// Music.app's plays, skips, and marks of every library track.
     func musicAppListens() -> [TrackListens] {
         let catalog = catalog.withLock { $0 }
         return state.withLock { state in
             catalog.filter { state.mac.songIDs.contains($0.id) }.map { song in
                 let listens = state.listens[song.id] ?? (0, 0)
-                return TrackListens(name: song.name, artist: song.artistName, plays: listens.plays, skips: listens.skips)
+                return TrackListens(name: song.name, artist: song.artistName, plays: listens.plays, skips: listens.skips,
+                                    favorited: state.favorited.contains(song.id), disliked: state.disliked.contains(song.id))
             }
         }
     }
@@ -546,6 +566,21 @@ final class FakeMusicApp: MusicApp {
         if let failure = state.withLock({ $0.failure }) { throw RadioError(failure) }
         return music.musicAppListens()
     }
+}
+
+/// A Radio following one station that played each of `titles` by "Band",
+/// a minute apart in order, after its first run.
+func harnessWithSongs(_ titles: [String], released: [String: String] = [:], playlistLimit: Int = 100,
+                      archiveLimit: Int = 10_000) async throws -> Harness {
+    let harness = try Harness(playlistLimit: playlistLimit, archiveLimit: archiveLimit)
+    try await harness.signIn()
+    _ = try await harness.radio.addStation(slug: "alt1021rva")
+    for (index, title) in titles.enumerated() {
+        harness.music.addToCatalog("Band", title, released: released[title])
+        harness.play("Band", title, minutesAgo: Double(titles.count - index))
+    }
+    _ = try await harness.radio.run()
+    return harness
 }
 
 /// Everything a Radio needs, wired to fakes and a temporary directory.

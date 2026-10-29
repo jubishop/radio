@@ -191,7 +191,7 @@ final class Store {
     }
 
     /// The schema version `migrate` produces.
-    private static let schemaVersion: Int64 = 13
+    private static let schemaVersion: Int64 = 14
 
     /// Both LaunchAgents open the database at once after a deploy, so the
     /// version is read again inside the write lock and only one migrates.
@@ -212,6 +212,7 @@ final class Store {
             if version < 11 { try migrateToSchemaEleven() }
             if version < 12 { try migrateToSchemaTwelve() }
             if version < 13 { try migrateToSchemaThirteen() }
+            if version < 14 { try migrateToSchemaFourteen() }
         }
     }
 
@@ -485,6 +486,15 @@ final class Store {
             }
         }
         try db.execute("PRAGMA user_version = 13")
+    }
+
+    /// Schema 14 keeps whether the user favorited each song or marked it
+    /// Suggest Less, which the user asked to push it out of
+    /// "Radio (Unplayed)" first on 2026-10-29. The next sync reads them.
+    private func migrateToSchemaFourteen() throws {
+        try db.execute("ALTER TABLE listens ADD COLUMN favorited INTEGER NOT NULL DEFAULT 0")
+        try db.execute("ALTER TABLE listens ADD COLUMN disliked INTEGER NOT NULL DEFAULT 0")
+        try db.execute("PRAGMA user_version = 14")
     }
 
     /// Moves a catalog song's matches, playlist entries, and records to
@@ -1088,7 +1098,7 @@ final class Store {
         return try db.query(
             """
             SELECT t.catalog_id, s.artist, s.title, s.catalog_name, s.catalog_artist, s.catalog_album, s.catalog_url,
-                c.text AS comment, x.plays, x.skips, r.released
+                c.text AS comment, x.plays, x.skips, x.favorited, x.disliked, r.released
             FROM playlist_tracks t JOIN songs s ON s.id = t.song_id
             LEFT JOIN music_comments c ON c.catalog_id = t.catalog_id
             LEFT JOIN listens x ON x.catalog_id = t.catalog_id
@@ -1102,7 +1112,8 @@ final class Store {
                 catalogID: catalogID, artist: row.string("catalog_artist") ?? row.string("artist")!,
                 title: row.string("catalog_name") ?? row.string("title")!, url: row.string("catalog_url"),
                 stations: stations[catalogID] ?? [], song: Self.musicAppSong(row), comment: row.string("comment"),
-                listens: Listens(plays: Int(row.int("plays") ?? 0), skips: Int(row.int("skips") ?? 0)),
+                listens: Listens(plays: Int(row.int("plays") ?? 0), skips: Int(row.int("skips") ?? 0),
+                                 favorited: row.int("favorited") == 1, disliked: row.int("disliked") == 1),
                 releaseDate: row.string("released").flatMap { $0.isEmpty ? nil : $0 }
             )
         }

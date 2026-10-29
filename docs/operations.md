@@ -58,12 +58,15 @@ station feeds. Run `radio sync` to do it immediately.
   page shows each song's release date and marks the song that leaves next.
 - **Radio (Unplayed)** holds 100 songs the stations played recently that
   you haven't played much. Until 2026-10-22 it was named "Radio (New)";
-  Radio renamed it in Music, keeping its songs. When a new song joins, the
-  song you've played and skipped most in Music leaves, or among ties, the
-  one the stations played longest ago. A song you've played more than every
-  song in "Radio (Unplayed)" stays out of it. The dashboard's
-  "Radio (Unplayed)" page shows your plays and skips and marks the song that
-  leaves next.
+  Radio renamed it in Music, keeping its songs. When a new song joins, a
+  song you've favorited or marked Suggest Less in Music leaves first, on
+  any device, including CarPlay. Otherwise the song you've played and
+  skipped most leaves, or among ties, the one the stations played longest
+  ago. Music counts a skip only in a song's first 20 seconds or so, so to
+  move out a song you leave later, mark it Suggest Less or favorite it. A
+  song that would leave before every song in "Radio (Unplayed)" stays out
+  of it. The dashboard's "Radio (Unplayed)" page shows your marks, plays,
+  and skips and marks the song that leaves next.
 - **Radio Archive** holds the 10,000 songs played most recently, and drops
   the oldest the same way as "Radio".
 

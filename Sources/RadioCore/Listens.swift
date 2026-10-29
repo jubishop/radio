@@ -2,13 +2,18 @@ import Foundation
 
 /// How often the user played and skipped a song in Music, in all time:
 /// the Plays and Skips of every library track with the song's title and
-/// artist, such as its clean and explicit copies.
+/// artist, such as its clean and explicit copies, and whether any of them
+/// is favorited or marked Suggest Less.
 struct Listens: Equatable {
     var plays: Int
     var skips: Int
+    var favorited = false
+    /// Suggest Less, which Music.app's scripting calls disliked.
+    var disliked = false
 
-    /// What decides which song leaves "Radio (Unplayed)" first. The user
-    /// chose to count skips as plays on 2026-10-20.
+    /// What decides which song leaves "Radio (Unplayed)" first among songs
+    /// with neither mark. The user chose to count skips as plays on
+    /// 2026-10-20, and for either mark to come first on 2026-10-29.
     var total: Int { plays + skips }
 }
 
@@ -18,12 +23,15 @@ struct UnheardContender {
     /// The song's latest play on any station, as stored, which sorts in
     /// time order.
     var latestPlay: String
+    var marked: Bool
     var listens: Int
 
     /// True when this song leaves a full "Radio (Unplayed)" before `other`:
-    /// the one the user played and skipped most, then the one the stations
-    /// played least recently.
+    /// one the user favorited or marked Suggest Less, then the one they
+    /// played and skipped most, then the one the stations played least
+    /// recently.
     func dropsBefore(_ other: UnheardContender) -> Bool {
+        if marked != other.marked { return marked }
         if listens != other.listens { return listens > other.listens }
         if latestPlay != other.latestPlay { return latestPlay < other.latestPlay }
         return catalogID < other.catalogID
@@ -31,16 +39,16 @@ struct UnheardContender {
 }
 
 /// Chooses the songs in "Radio (Unplayed)". A song entering it when it's full
-/// pushes out the song the user played and skipped most in Music, the least
-/// recently played among ties, and a song the user played more than every
-/// song there stays out. That applies to new songs, songs already in the
-/// library, and songs a station plays again after they left. Radio
-/// remembers its choices, so a song that left or stayed out comes back into
-/// contention only when a station plays it again. "Radio" and "Radio
-/// Archive" keep the most recently played songs, and "Radio (New)" the
-/// newest releases.
+/// pushes out a song the user favorited or marked Suggest Less in Music, or
+/// else the one they played and skipped most, the least recently played
+/// among ties, and a song that would leave before every song there stays
+/// out. That applies to new songs, songs already in the library, and songs
+/// a station plays again after they left. Radio remembers its choices, so a
+/// song that left or stayed out comes back into contention only when a
+/// station plays it again. "Radio" and "Radio Archive" keep the most
+/// recently played songs, and "Radio (New)" the newest releases.
 extension Radio {
-    /// Records the user's plays and skips of each matched song from
+    /// Records the user's plays, skips, and marks of each matched song from
     /// Music.app. After a failure, they stay as last read, and the rest of
     /// the sync skips Music.app.
     func readListens(music: inout MusicAppSession) async throws {
@@ -56,8 +64,12 @@ extension Radio {
         var byTitle: [String: Listens] = [:]
         for track in tracks {
             let key = MusicAppSong.key(name: track.name, artist: track.artist)
-            let sum = byTitle[key] ?? Listens(plays: 0, skips: 0)
-            byTitle[key] = Listens(plays: sum.plays + track.plays, skips: sum.skips + track.skips)
+            var sum = byTitle[key] ?? Listens(plays: 0, skips: 0)
+            sum.plays += track.plays
+            sum.skips += track.skips
+            sum.favorited = sum.favorited || track.favorited
+            sum.disliked = sum.disliked || track.disliked
+            byTitle[key] = sum
         }
         var listens: [String: Listens] = [:]
         for song in try store.catalogTitles() {
@@ -116,15 +128,16 @@ extension Store {
         ).map { ($0.string("catalog_id")!, $0.string("catalog_name")!, $0.string("catalog_artist")!) }
     }
 
-    /// Replaces every song's plays and skips; a song missing from `listens`
-    /// has none.
+    /// Replaces every song's listens; a song missing from `listens` has
+    /// none.
     func recordListens(_ listens: [String: Listens]) throws {
         try db.transaction {
             try db.execute("DELETE FROM listens")
             for (catalogID, song) in listens {
                 try db.execute(
-                    "INSERT INTO listens (catalog_id, plays, skips) VALUES (?, ?, ?)",
-                    [.text(catalogID), .integer(Int64(song.plays)), .integer(Int64(song.skips))]
+                    "INSERT INTO listens (catalog_id, plays, skips, favorited, disliked) VALUES (?, ?, ?, ?, ?)",
+                    [.text(catalogID), .integer(Int64(song.plays)), .integer(Int64(song.skips)),
+                     .integer(song.favorited ? 1 : 0), .integer(song.disliked ? 1 : 0)]
                 )
             }
         }
@@ -178,7 +191,8 @@ extension Store {
                 WHERE s.status = 'matched'
                 GROUP BY s.catalog_id
             )
-            SELECT l.catalog_id, l.latest_played, c.chosen, COALESCE(x.plays + x.skips, 0) AS listens
+            SELECT l.catalog_id, l.latest_played, c.chosen,
+                COALESCE(x.favorited OR x.disliked, 0) AS marked, COALESCE(x.plays + x.skips, 0) AS listens
             FROM latest l
             LEFT JOIN unheard_choices c ON c.catalog_id = l.catalog_id
             LEFT JOIN listens x ON x.catalog_id = l.catalog_id
@@ -187,7 +201,7 @@ extension Store {
             """
         ) {
             let song = UnheardContender(catalogID: row.string("catalog_id")!, latestPlay: row.string("latest_played")!,
-                                      listens: Int(row.int("listens")!))
+                                      marked: row.int("marked") == 1, listens: Int(row.int("listens")!))
             if row.int("chosen") == 1 { chosen.append(song) } else { newcomers.append(song) }
         }
         return (chosen, newcomers)

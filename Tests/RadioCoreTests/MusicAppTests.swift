@@ -4,19 +4,6 @@ import SQLite3
 import Testing
 
 @Suite struct MusicAppTests {
-    func harnessWithSongs(_ titles: [String], released: [String: String] = [:], playlistLimit: Int = 100,
-                          archiveLimit: Int = 10_000) async throws -> Harness {
-        let harness = try Harness(playlistLimit: playlistLimit, archiveLimit: archiveLimit)
-        try await harness.signIn()
-        _ = try await harness.radio.addStation(slug: "alt1021rva")
-        for (index, title) in titles.enumerated() {
-            harness.music.addToCatalog("Band", title, released: released[title])
-            harness.play("Band", title, minutesAgo: Double(titles.count - index))
-        }
-        _ = try await harness.radio.run()
-        return harness
-    }
-
     @Test func aReplayedSongMovesToTheEnd() async throws {
         let harness = try await harnessWithSongs(["A", "B", "C"])
         harness.clock.advance(hours: 1)
@@ -84,6 +71,32 @@ import Testing
         harness.play("Band", "D")
         _ = try await harness.radio.run()
         #expect(harness.music.playlists()["Radio (Unplayed)"] == ["B", "C", "D"])
+    }
+
+    /// The user asked on 2026-10-29 for a song they favorited or marked
+    /// Suggest Less to leave "Radio (Unplayed)" before any other, and to
+    /// stay out.
+    @Test func aFavoriteOrSuggestLessSongLeavesRadioUnplayedFirst() async throws {
+        let harness = try await harnessWithSongs(["A", "B", "C"], playlistLimit: 3)
+        harness.music.setListens("A", plays: 5)
+        harness.music.favorite("C")
+        harness.music.addToCatalog("Band", "D")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "D")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio (Unplayed)"] == ["A", "B", "D"])
+
+        harness.music.suggestLess("B")
+        harness.music.addToCatalog("Band", "E")
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "E")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio (Unplayed)"] == ["A", "D", "E"])
+
+        harness.clock.advance(hours: 1)
+        harness.play("Band", "C")
+        _ = try await harness.radio.run()
+        #expect(harness.music.playlists()["Radio (Unplayed)"] == ["A", "D", "E"])
     }
 
     /// A song stays out of a full "Radio (Unplayed)" when you've played it more
@@ -284,7 +297,7 @@ import Testing
         try """
             #!/bin/sh
             i=0
-            while [ $i -lt 5000 ]; do printf 'Song %d\\037Band\\0373\\0371\\036' $i; i=$((i + 1)); done
+            while [ $i -lt 5000 ]; do printf 'Song %d\\037Band\\0373\\0371\\037false\\037false\\036' $i; i=$((i + 1)); done
             """.write(to: osascript, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: osascript.path)
 
@@ -328,13 +341,13 @@ import Testing
         await #expect(throws: RadioError.self) { try await music.fellBehind(since: start) }
     }
 
-    @Test func musicsPlaysAndSkipsAreReadFromTheScriptsOutput() {
+    @Test func musicsPlaysSkipsAndMarksAreReadFromTheScriptsOutput() {
         let record = String(UnicodeScalar(30)), field = String(UnicodeScalar(31))
-        let output = ["Babydoll", "Dominic Fike", "12", "3"].joined(separator: field) + record
-            + ["Tab\there", "Band", "0", "0"].joined(separator: field)
+        let output = ["Babydoll", "Dominic Fike", "12", "3", "true", "false"].joined(separator: field) + record
+            + ["Tab\there", "Band", "0", "0", "false", "true"].joined(separator: field)
         #expect(ScriptedMusicApp.listens(fromOutput: output) == [
-            TrackListens(name: "Babydoll", artist: "Dominic Fike", plays: 12, skips: 3),
-            TrackListens(name: "Tab\there", artist: "Band", plays: 0, skips: 0),
+            TrackListens(name: "Babydoll", artist: "Dominic Fike", plays: 12, skips: 3, favorited: true),
+            TrackListens(name: "Tab\there", artist: "Band", plays: 0, skips: 0, disliked: true),
         ])
         #expect(ScriptedMusicApp.listens(fromOutput: "").isEmpty)
     }
@@ -397,7 +410,7 @@ import Testing
         let later = harness.clock.now.formatted(.iso8601)
         // Schema 12 matched the second spelling to the second release, and
         // Music.app placed it as the first release's entry.
-        executeSQL([
+        executeSQL(undoSchemaFourteen + [
             """
             INSERT INTO songs (id, key, artist, title, status, catalog_id, catalog_url, catalog_name, catalog_artist,
                 catalog_album, matched_by, first_heard_at, resolved_at)
