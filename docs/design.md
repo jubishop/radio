@@ -932,6 +932,28 @@ recommended macOS CI job, which would have cost 10× Actions minutes on this
 private repository. The tradeoff is that nothing enforces the application
 checks.
 
+### Keep each log under 1 MB
+
+Accepted 2026-10-29. The user asked for a bound on the logs in
+`~/Library/Logs/Radio`, such as about 1 MB each plus one previous copy.
+Nothing rotated them: on 2026-10-29 the `run` log was 677 KB after 16 days of
+runs every 15 minutes, about 15 MB a year.
+
+- **When:** each `radio run`, which launchd starts every 15 minutes, checks
+  every `.log` file in the directory `bin/deploy` passes with `--logs`. A log
+  of 1 MB or more is rotated, so a log passes the limit only by what's
+  written before the next run.
+- **How:** Radio copies the log to its name plus `.0`, replacing the previous
+  copy, then empties it in place. launchd opens each agent's log for
+  appending, and `radio serve` holds its log open as long as it runs, so a
+  renamed log would keep growing under its new name; emptied in place, the
+  next line lands at its start, with no gap of zero bytes. A line `serve`
+  writes while the log is being copied can be lost, but it writes one line
+  each time it starts. `newsyslog` would need a root-owned config in
+  `/etc/newsyslog.d`.
+- **Failures:** a run that can't rotate a log says so in its log and exits
+  with status 1, but still polls and syncs.
+
 ## Accepted implementation defaults
 
 Accepted 2026-10-13. The user approved these proposed defaults that day,
