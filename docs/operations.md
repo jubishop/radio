@@ -23,6 +23,11 @@ LaunchAgents:
 | `com.jubishop.radio.run` | `radio run` every 15 minutes: poll, sync, alerts | `~/Library/Logs/Radio/com.jubishop.radio.run.log` |
 | `com.jubishop.radio.serve` | `radio serve`, kept running: the dashboard on port 8102 | `~/Library/Logs/Radio/com.jubishop.radio.serve.log` |
 
+Each run keeps every log there under 1 MB. A log that reaches 1 MB is copied
+to the same name plus `.0`, such as `com.jubishop.radio.run.log.0`, replacing
+the previous copy, and starts again empty. The
+[decision](design.md#keep-each-log-under-1-mb) explains how.
+
 Data lives in `~/Library/Application Support/Radio`: `radio.sqlite`,
 `credentials.json`, and the MusicKit key. Every file there is owner-only.
 

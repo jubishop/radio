@@ -14,8 +14,9 @@ let usage = """
       station list            List followed stations
 
     Scheduled work
-      run                     Poll, sync, and send alerts and the daily review
-                              reminder (launchd runs this)
+      run [--logs DIR]        Poll, sync, and send alerts and the daily review
+                              reminder, first keeping each log in DIR under
+                              1 MB (launchd runs this)
       poll                    Log new plays from every station
       sync                    Match new songs and update the playlists
       serve [--port 8102]     Serve the dashboard (launchd keeps this running)
@@ -148,10 +149,21 @@ func main(_ arguments: [String]) async throws -> Int32 {
         printSync(report)
         return report.error == nil ? 0 : 1
     case "run":
+        var rotated = true
+        if let logs = try option("--logs", in: rest) {
+            do {
+                for name in try rotateLogs(in: URL(fileURLWithPath: (logs as NSString).expandingTildeInPath)) {
+                    log("Rotated \(name); the previous copy is \(name).0")
+                }
+            } catch {
+                log("Can't rotate logs: \(error)")
+                rotated = false
+            }
+        }
         let (polls, sync) = try await makeRadio().run()
         printPolls(polls)
         printSync(sync)
-        return polls.allSatisfy { $0.error == nil } && sync.error == nil ? 0 : 1
+        return rotated && polls.allSatisfy { $0.error == nil } && sync.error == nil ? 0 : 1
     case "serve":
         let radio = try makeRadio()
         let port = UInt16(try option("--port", in: rest) ?? "8102") ?? 8102

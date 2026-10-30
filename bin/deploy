@@ -1,6 +1,7 @@
 #!/bin/sh
 # Build Radio, install it as ~/.local/bin/radio, and (re)load its two LaunchAgents:
 # com.jubishop.radio.run every 15 minutes and com.jubishop.radio.serve always.
+# Each run keeps every log in ~/Library/Logs/Radio under 1 MB.
 set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 bin_dir="$HOME/.local/bin"
@@ -87,7 +88,7 @@ PLIST
 write_agent com.jubishop.radio.run "  <key>StartInterval</key>
   <integer>900</integer>
   <key>RunAtLoad</key>
-  <true/>" run
+  <true/>" run --logs "$log_dir"
 write_agent com.jubishop.radio.serve "  <key>KeepAlive</key>
   <true/>
   <key>RunAtLoad</key>
