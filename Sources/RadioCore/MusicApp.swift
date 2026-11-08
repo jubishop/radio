@@ -229,16 +229,20 @@ public struct ScriptedMusicApp: MusicApp {
             }
             DispatchQueue.global().async {
                 let data = output.fileHandleForReading.readDataToEndOfFile()
+                try? output.fileHandleForReading.close()
                 replies.withLock { $0.output = data }
                 reading.leave()
             }
             DispatchQueue.global().async {
                 let data = errors.fileHandleForReading.readDataToEndOfFile()
+                try? errors.fileHandleForReading.close()
                 replies.withLock { $0.errors = data }
                 reading.leave()
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                if process.isRunning { process.terminate() }
+            // Held weakly, so a command that exits sooner doesn't keep its
+            // process and pipes open until the timeout.
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak process] in
+                if let process, process.isRunning { process.terminate() }
             }
         }
     }

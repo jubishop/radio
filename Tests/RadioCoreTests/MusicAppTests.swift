@@ -307,6 +307,48 @@ import Testing
         #expect(listens.last == TrackListens(name: "Song 4999", artist: "Band", plays: 3, skips: 1))
     }
 
+    /// A sync runs osascript once per playlist edit. After a reboot on
+    /// 2026-11-08, about 700 calls in five minutes left 714 pipes open,
+    /// since each command's two were held until its timeout passed.
+    @Test func aCommandsPipesCloseWhenItExitsBeforeTheTimeout() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("osascript-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let osascript = directory.appendingPathComponent("osascript")
+        try "#!/bin/sh\nexit 0\n".write(to: osascript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: osascript.path)
+        let music = ScriptedMusicApp(timeout: 120, osascript: osascript.path)
+
+        let before = openPipes()
+        for _ in 0..<100 { _ = try await music.listens() }
+
+        // Other suites running at the same time hold a few pipes of their own.
+        #expect(openPipes() - before < 20)
+    }
+
+    @Test func aCommandThatHangsIsStoppedAtTheTimeout() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("osascript-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let osascript = directory.appendingPathComponent("osascript")
+        try "#!/bin/sh\nexec sleep 30\n".write(to: osascript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: osascript.path)
+
+        let error = await #expect(throws: RadioError.self) {
+            try await ScriptedMusicApp(timeout: 1, osascript: osascript.path).listens()
+        }
+        #expect(error?.description == "Music didn't respond within 1 seconds")
+    }
+
+    /// The pipe descriptors this process has open.
+    func openPipes() -> Int {
+        let descriptors = (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd")) ?? []
+        return descriptors.compactMap(Int32.init).filter { descriptor in
+            var status = stat()
+            return fstat(descriptor, &status) == 0 && status.st_mode & S_IFMT == S_IFIFO
+        }.count
+    }
+
     /// The library agent logged this note with every edit while an alert
     /// held Music.app back on 2026-10-24.
     @Test func musicIsBehindWhenTheLibraryAgentLogsAChangeFromAnOldRevision() async throws {
