@@ -144,7 +144,7 @@ final class FakeIHeart: Sendable {
 
 /// Hubbard Radio's listen-live player settings and cue history.
 final class FakeHubbard: Sendable {
-    private let cues = Mutex<[(id: Int, time: Date, type: String, artist: String, title: String)]>([])
+    private let cues = Mutex<[(id: Int, time: Date, type: String, artist: String, title: String, numeric: Bool)]>([])
     private let nextID = Mutex(40_200_000)
 
     init(http: FakeHTTP) {
@@ -158,16 +158,19 @@ final class FakeHubbard: Sendable {
             let limit = body?["limit"] as? Int ?? 6
             let recent = cues.withLock { $0 }.suffix(min(limit, 300)).reversed()
             return json(["success": true, "data": ["code": 200, "response": recent.map {
-                ["id": String($0.id), "application": "25", "timestamp": String(Int($0.time.timeIntervalSince1970)),
+                ["id": $0.numeric ? $0.id as Any : String($0.id), "application": "25",
+                 "timestamp": $0.numeric ? Int($0.time.timeIntervalSince1970) as Any : String(Int($0.time.timeIntervalSince1970)),
                  "type": $0.type, "cut_id": "cut", "likes": 0, "itunes_url": "",
                  "data": ["cut_id": "cut", "description": $0.title, "artist": $0.artist, "album": "", "time": "180000"]]
             }]])
         }
     }
 
-    func play(_ artist: String, _ title: String, at time: Date, type: String = "song") {
+    /// A `numeric` cue sends its ID and timestamp as JSON numbers, as
+    /// MOViN 92.5's newest cue sometimes did, instead of strings.
+    func play(_ artist: String, _ title: String, at time: Date, type: String = "song", numeric: Bool = false) {
         let id = nextID.withLock { value in defer { value += 1 }; return value }
-        cues.withLock { $0.append((id, time, type, artist, title)) }
+        cues.withLock { $0.append((id, time, type, artist, title, numeric)) }
     }
 }
 
