@@ -57,7 +57,10 @@ POST https://live.<domain>/wp-json/hll/v1/hll_cues_get
 ```
 
 - `response` lists cues newest first. `timestamp` is the start time in Unix
-  seconds, and `id` and `timestamp` are strings.
+  seconds, and `id` and `timestamp` are strings. From 2026-10-17, the newest
+  cue sometimes gave `timestamp` as a JSON number instead, and Radio failed
+  to read MOViN 92.5's feed 34 times before it took either form. Radio reads
+  `id` either way too.
 - `data.description` is the title. `data.time` is the length in
   milliseconds.
 - Artists and titles sometimes carry HTML entities. One of MOViN 92.5's first

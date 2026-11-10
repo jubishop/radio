@@ -187,9 +187,9 @@ public struct HubbardSource: PlaySource {
         let data = try await http.send(request).requireSuccess(for: url)
         // The player skips ad cues, and only songs belong in the log.
         return try JSONDecoder().decode(Cues.self, from: data).data.response.compactMap { cue in
-            guard cue.type == "song", let startTime = TimeInterval(cue.timestamp) else { return nil }
+            guard cue.type == "song", let startTime = TimeInterval(cue.timestamp.text) else { return nil }
             return FeedPlay(
-                playID: cue.id,
+                playID: cue.id.text,
                 playedAt: Date(timeIntervalSince1970: startTime),
                 artist: feedText(cue.data?.artist),
                 title: feedText(cue.data?.description)
@@ -218,14 +218,32 @@ public struct HubbardSource: PlaySource {
     }
 
     private struct Cue: Decodable {
-        let id: String
-        let timestamp: String
+        let id: StringOrNumber
+        let timestamp: StringOrNumber
         let type: String
         let data: Song?
 
         struct Song: Decodable {
             let artist: String?
             let description: String?
+        }
+    }
+
+    /// The feed sends `id` and `timestamp` as strings, but from 2026-10-17
+    /// its newest cue sometimes gave its timestamp as a number. A whole
+    /// number reads as the same text either way, so a cue keeps its play ID.
+    private struct StringOrNumber: Decodable {
+        let text: String
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let string = try? container.decode(String.self) {
+                text = string
+            } else if let number = try? container.decode(Int64.self) {
+                text = String(number)
+            } else {
+                text = String(try container.decode(Double.self))
+            }
         }
     }
 }

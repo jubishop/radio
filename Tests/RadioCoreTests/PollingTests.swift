@@ -90,6 +90,24 @@ import Testing
         #expect(rows.first?[1] == played.formatted(.iso8601))
     }
 
+    /// From 2026-10-17, MOViN 92.5's newest cue sometimes gave its timestamp
+    /// as a number, and Radio failed to read the whole feed 34 times.
+    @Test func aHubbardCueWithANumericTimestampIsLogged() async throws {
+        let harness = try Harness()
+        _ = try await harness.radio.addStation(slug: "movin925.com", source: "hubbard")
+        let played = harness.clock.now.addingTimeInterval(-600)
+        harness.hubbard.play("Tame Impala", "Loser", at: played)
+        harness.hubbard.play("Dominic Fike", "Babydoll", at: harness.clock.now, numeric: true)
+
+        let polls = try await harness.radio.poll()
+
+        #expect(polls.map(\.newPlays) == [2])
+        let rows = try await harness.radio.exportCSV(stationSlug: "movin925.com").split(separator: "\n").dropFirst()
+            .map { $0.split(separator: ",").map(String.init) }
+        #expect(rows.map { $0[2...3].joined(separator: " – ") } == ["Tame Impala – Loser", "Dominic Fike – Babydoll"])
+        #expect(rows.last?[1] == harness.clock.now.formatted(.iso8601))
+    }
+
     /// Seen 2026-10-15: MOViN 92.5's feed sent "Macklemore &amp; Ryan Lewis",
     /// which kept the song from matching.
     @Test func htmlEntitiesInFeedsAreDecoded() async throws {
