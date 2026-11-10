@@ -241,10 +241,21 @@ makes the stall visible:
 
 - **Detection:** after each scheduled run's sync, Radio asks the unified log
   (`log show`) whether `AMPLibraryAgent` logged "sent change using
-  non-current revision" since the run began. A run that finds it marks Music
-  as behind, a run that doesn't clears the mark, and a run that can't read
-  the log changes nothing. This needs no new permission and took about 1.4
-  seconds on 2026-10-25.
+  non-current revision" since the run began, and whether Music.app then took
+  in the library's revision that the note names, such as `library:11092`.
+  Music.app logs "Starting applying 2 changes from library at revision:
+  11093." and then "Applied 2 changes from library" when it does. A run with
+  a note that Music.app hasn't caught up to marks Music as behind, a run
+  without one clears the mark, and a run that can't read the log changes
+  nothing. This needs no new permission and took about 1.4 seconds on
+  2026-10-25.
+- **Healthy notes:** a working Music.app also sends a change one revision
+  behind now and then, when another change reaches the library just before
+  its own, and takes in that change within seconds. On 2026-11-09 it did
+  this 15 times between 2 and 7 PM PST, each time one revision behind.
+  Radio first counted any note as behind, so runs in a row that each found
+  one sent a false alert that evening. Music.app caught up after every one
+  of those notes, so the revision check finds none of those runs behind.
 - **Alert:** once Music has been behind for 30 minutes, one Pushover alert
   says to open Music on the Mac mini, and links to the dashboard. It can
   alert again only after Music catches up. The dashboard and `radio status`
@@ -263,8 +274,11 @@ The tradeoffs:
 
 - The alert comes 30 to 45 minutes after Music stalls, since runs are about
   15 minutes apart.
-- It depends on log text Apple doesn't document. If Apple changes it, the
-  alert stops firing; it doesn't send false ones.
+- It depends on log text Apple doesn't document. If Apple changes the
+  library agent's note, the alert stops firing. If Apple changes Music.app's
+  "Starting applying" or "Applied" text, or a note no longer names the
+  library's revision, every note counts as behind again, and healthy notes
+  in runs in a row can send false alerts.
 - A run whose sync made no Music.app edits finds no note and clears the mark.
 
 ### Support many stations

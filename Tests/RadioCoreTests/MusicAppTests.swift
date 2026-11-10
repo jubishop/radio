@@ -375,12 +375,42 @@ import Testing
         let arguments = try String(contentsOf: directory.appendingPathComponent("arguments"), encoding: .utf8)
         #expect(arguments.hasPrefix("show\n--start\n2026-10-25 06:28:10+0000\n"))
         #expect(arguments.contains(#"process == "AMPLibraryAgent" AND eventMessage CONTAINS "sent change using non-current revision""#))
+        #expect(arguments.contains(#"process == "Music" AND eventMessage CONTAINS "changes from library""#))
 
         FileManager.default.createFile(atPath: directory.appendingPathComponent("behind").path, contents: nil)
         #expect(try await music.fellBehind(since: start))
 
         FileManager.default.createFile(atPath: directory.appendingPathComponent("broken").path, contents: nil)
         await #expect(throws: RadioError.self) { try await music.fellBehind(since: start) }
+    }
+
+    /// On 2026-11-09, Music.app sent eight changes one revision behind the
+    /// library and took in the library's newer change within seconds each
+    /// time. Counting those notes as falling behind sent two false alerts.
+    @Test func musicIsntBehindOnceItTakesInTheLibrarysChanges() {
+        let note = "2026-11-09 18:10:15.956 Df AMPLibraryAgent[975:2855] [com.apple.amp.library:service] ch> "
+            + "ClientID:200 sent change using non-current revision. client:11091 library:11092"
+        func applying(_ revision: Int) -> String {
+            "2026-11-09 18:10:16.039 Df Music[809:2113] [com.apple.amp.library:client] "
+                + "Starting applying 2 changes from library at revision: \(revision)."
+        }
+        let applied = "2026-11-09 18:10:16.116 Df Music[809:2113] [com.apple.amp.library:client] "
+            + "Applied 2 changes from library took 0.001134 seconds. Stats:411 Avg:0.01433 Min:0.00000 Max:2.16106"
+        let header = "Timestamp               Ty Process[PID:TID]"
+
+        #expect(!ScriptedMusicApp.fellBehind(fromOutput: header))
+        #expect(!ScriptedMusicApp.fellBehind(fromOutput: [header, applying(11093), applied].joined(separator: "\n")))
+        #expect(!ScriptedMusicApp.fellBehind(fromOutput: [header, note, applying(11093), applied].joined(separator: "\n")))
+        #expect(!ScriptedMusicApp.fellBehind(fromOutput: [header, note, applying(11092), applied].joined(separator: "\n")))
+        // Music hasn't taken in the change the library made after its own.
+        #expect(ScriptedMusicApp.fellBehind(fromOutput: [header, note].joined(separator: "\n")))
+        #expect(ScriptedMusicApp.fellBehind(fromOutput: [header, applying(11091), applied, note].joined(separator: "\n")))
+        #expect(ScriptedMusicApp.fellBehind(fromOutput: [header, note, applying(11093)].joined(separator: "\n")))
+        // A note Radio can't read still counts.
+        #expect(ScriptedMusicApp.fellBehind(fromOutput: [
+            header, "2026-11-09 18:10:15.956 Df AMPLibraryAgent[975:2855] sent change using non-current revision.",
+            applying(11093), applied,
+        ].joined(separator: "\n")))
     }
 
     @Test func musicsPlaysSkipsAndMarksAreReadFromTheScriptsOutput() {

@@ -150,19 +150,46 @@ public struct ScriptedMusicApp: MusicApp {
     }
 
     /// Looks in the unified log for the library agent's note that Music.app
-    /// changed the library from an older revision than the library's. It
-    /// logged one with every edit Radio made while an alert held Music.app
-    /// back, from 11:28 PM on 2026-10-24 to 9:13 AM the next day, and none
-    /// in the day before.
+    /// changed the library from an older revision than the library's, and
+    /// for Music.app taking in the library's changes. The agent logged the
+    /// note with every edit Radio made while an alert held Music.app back,
+    /// from 11:28 PM on 2026-10-24 to 9:13 AM the next day. A healthy
+    /// Music.app also sends one now and then, when a change reaches the
+    /// library just before its own, and takes in that change within seconds.
     public func fellBehind(since date: Date) async throws -> Bool {
         let output = try await run(log, [
             "show", "--start", Self.logTime(date), "--style", "compact",
-            "--predicate", "process == \"AMPLibraryAgent\" AND eventMessage CONTAINS \"\(Self.behindNote)\"",
+            "--predicate", "(process == \"AMPLibraryAgent\" AND eventMessage CONTAINS \"\(Self.behindNote)\")"
+                + " OR (process == \"Music\" AND eventMessage CONTAINS \"\(Self.appliedNote)\")",
         ], name: "log") { RadioError("Couldn't read Music's log: \($0)") }
-        return output.contains(Self.behindNote)
+        return Self.fellBehind(fromOutput: output)
     }
 
     static let behindNote = "sent change using non-current revision"
+    static let appliedNote = "changes from library"
+
+    /// Whether Music.app still hasn't taken in the library's revision as of
+    /// its latest out-of-date change. The agent's note gives the library's
+    /// revision, as in `client:11091 library:11092`. Music.app logs "Starting
+    /// applying 2 changes from library at revision: 11093." and then "Applied
+    /// 2 changes from library" once it has caught up to that revision. A
+    /// note without a revision counts as behind.
+    public static func fellBehind(fromOutput output: String) -> Bool {
+        var needed = 0
+        var applying = 0
+        var applied = 0
+        for line in output.split(separator: "\n") {
+            if line.contains(behindNote) {
+                guard let revision = line.firstMatch(of: /library:(\d+)/).flatMap({ Int($0.1) }) else { return true }
+                needed = max(needed, revision)
+            } else if let match = line.firstMatch(of: /Starting applying \d+ changes from library at revision: (\d+)/) {
+                applying = Int(match.1) ?? 0
+            } else if line.contains(/Applied \d+ changes from library/) {
+                applied = max(applied, applying)
+            }
+        }
+        return needed > applied
+    }
 
     /// A time as `log show` reads it, in UTC, which no change of clocks
     /// makes ambiguous.
