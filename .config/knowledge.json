@@ -24,5 +24,11 @@
       "context": {"/": "Shared Project Starter policy for engineering and knowledge search. Project pages may add stronger rules."}
     }
   },
-  "checks": {"exclude": ["memory/pr_reviews/**"]}
+  "checks": {"exclude": ["memory/pr_reviews/**"]},
+  "memoryAudit": {
+    "schedule": {
+      "weekday": "Tuesday",
+      "hour": 5
+    }
+  }
 }
