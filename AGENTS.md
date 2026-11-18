@@ -32,16 +32,15 @@ take precedence over this block and the foundation pages wherever they differ.
 ## Project
 
 - Radio follows radio stations and builds Apple Music playlists from the
-  songs they play. It is a dependency-free Swift package (macOS 26+,
-  Swift 6.2+); `bin/check-application` builds and tests it, and CI cannot, so
-  run `bin/check --full` locally before merging. Commands, versions, and
-  deployment (`bin/deploy`) are in
+  songs they play. It is a dependency-free Swift package whose commands,
+  versions, and deployment are in
   [development workflow](docs/development-workflow.md).
-- Deliver finished changes without asking: once the required checks pass,
-  commit to `main`, push, and run `bin/deploy` whenever the
+- Deliver each finished change without asking, production code included:
+  once its checks pass, commit it straight to `main`, not through a pull
+  request, and run `bin/deploy` whenever the
   [development workflow](docs/development-workflow.md#deployment) calls for
-  it.
+  it. CI can't run the macOS-only `bin/check-application`, so production code
+  always needs a local `bin/check --full`.
 - Run the CLI from a checkout with `RADIO_HOME` set to a scratch directory and
   `RADIO_ENV_FILE=/dev/null`, so it never touches the live database or sends
   alerts.
-- The project is MIT licensed; keep `LICENSE` in the root.
